@@ -1,0 +1,41 @@
+# .air.toml - Configuration for Air hot-reloader
+
+# Working directory, default is current directory
+root = "."
+# Optional! Use a different temporary directory, default is ./tmp
+tmp_dir = "tmp"
+
+[build]
+# Command to build your app. Make sure it builds the main package.
+cmd = "go build -o ./tmp/main ."
+# The final binary path Air should run.
+bin = "tmp/main"
+# Files or directories to watch. Changes here trigger a rebuild.
+include_ext = ["go", "tpl", "tmpl", "html", "env", "toml", "yaml", "json"] # Add config file types if needed
+# Directories to exclude from watching.
+exclude_dir = ["assets", "tmp", "vendor", "docs", "node_modules"] # Exclude generated docs and tmp dir
+# Files to exclude
+# exclude_file = []
+# Regex patterns to exclude
+# exclude_regex = ["_test.go"]
+# Directories to watch in addition to root.
+# include_dir = []
+# Log file for the build process itself
+log = "air_build.log"
+# Delay in milliseconds before triggering a build after a change.
+delay = 1000 # 1 second
+# Stop running the existing binary before building.
+stop_on_error = true
+# Send interrupt signal instead of kill (better for graceful shutdown)
+send_interrupt = true
+
+[log]
+# Show timestamp in logs
+time = true
+
+[misc]
+# Delete tmp directory on exit
+clean_on_exit = true
+
+[screen]
+clear_on_rebuild = true

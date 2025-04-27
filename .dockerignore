@@ -1,0 +1,33 @@
+# Git files
+.git
+.gitignore
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Temporary files and logs
+tmp/
+*.log
+air_build.log
+
+# Go build cache/modules (handled inside Dockerfile)
+vendor/
+*.exe
+*.exe~
+*.test
+
+# Node modules (if any frontend added later)
+node_modules/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Secrets / Local config (should use env vars)
+# config.local.yaml
+
+# Generated docs (will be generated during build)
+docs/
+

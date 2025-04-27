@@ -1,0 +1,11 @@
+server:
+  port: 8080
+  host: 'localhost' # Will be overridden by env var SERVER_HOST="0.0.0.0" in compose
+
+database:
+  host: 'localhost' # Will be overridden by env var DB_HOST="db" in compose
+  port: 5432
+  user: 'postgres' # Will be overridden by env var DB_USER in compose
+  password: 'postgres' # Will be overridden by env var DB_PASSWORD in compose
+  name: 'api_db' # Will be overridden by env var DB_NAME in compose
+

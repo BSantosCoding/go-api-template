@@ -1,0 +1,69 @@
+# /home/bsant/testing/go-api-template/docker-compose.yml
+version: '3.8'
+
+services:
+  # PostgreSQL Database Service
+  db:
+    # ... (db service definition remains the same) ...
+    image: postgres:15-alpine
+    container_name: go_api_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-api_db}
+    ports:
+      - '${DB_PORT_HOST:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-api_db}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Go API Service
+  api:
+    container_name: go_api_app
+    build:
+      context: . # Build from the current directory's Dockerfile
+      target: builder # --- ADD THIS LINE: Use the 'builder' stage ---
+    ports:
+      - '${SERVER_PORT_HOST:-8080}:8080'
+    volumes:
+      # Mount source code for hot-reloading
+      - .:/app
+      # Prevent host tmp/docs from overwriting container versions
+      - /app/tmp
+      - /app/docs
+      # Prevent go build cache/mod cache on host interfering
+      - /app/go/pkg/mod
+      - /app/root/.cache/go-build
+    environment:
+      CORS_ALLOWED_ORIGINS: '*'
+      SERVER_HOST: '0.0.0.0'
+      SERVER_PORT: 8080
+      DATABASE_URL: 'postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-api_db}?sslmode=disable'
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-api_db}
+      GIN_MODE: debug
+      # Ensure GOPATH is set correctly if needed by tools inside builder
+      # GOPATH: /go
+    depends_on:
+      db:
+        condition: service_healthy
+    # Use Air for hot-reloading
+    command: air
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local

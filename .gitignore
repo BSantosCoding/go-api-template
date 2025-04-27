@@ -1,0 +1,62 @@
+# --- Go Build Outputs & Binaries ---
+# Ignore compiled executables
+# Binary named after the directory (if built in root)
+/go-api-template
+# Explicit binary name if built as 'main' in root
+/main
+# Windows executables
+*.exe
+*.exe~
+# Go test binaries
+*.test
+
+# --- Development Tool Artifacts ---
+# Air build directory (contains compiled binary for hot-reload)
+/tmp/
+
+# --- Go Dependencies ---
+# Ignore vendor directory if using Go modules (standard practice)
+/vendor/
+
+# --- Generated Code/Files ---
+# Generated documentation (swag)
+# Should be regenerated via 'make swagger-gen' or 'make dev'
+/docs/
+
+# --- Log Files ---
+# Ignore all log files
+*.log
+# Specific logs from tools like Air
+air_build.log
+
+# --- Environment Variables / Secrets ---
+# Contains sensitive information like database passwords, API keys, etc.
+# NEVER commit this file!
+.env
+
+# --- Optional Local Configuration Overrides ---
+# Uncomment if you use a specific file for local config overrides
+# config.local.yaml
+
+# --- OS Generated Files ---
+# Ignore macOS system files
+.DS_Store
+# Ignore Windows thumbnail cache files
+Thumbs.db
+# Ignore Linux/Unix swap files (often from vim)
+*.swp
+# Ignore backup files often created by editors
+*~
+
+# --- Editor/IDE Specific Files ---
+# Uncomment or add lines for your specific editor if needed
+# Usually better handled by a global gitignore, but can be included here
+# .vscode/
+# .idea/
+
+# --- Docker ---
+# Although Dockerfile, docker-compose.yml, .dockerignore are committed,
+# sometimes build caches or temporary files might appear.
+# Generally, .dockerignore handles the Docker build context well.
+# No common Docker runtime files need ignoring here usually.
+
