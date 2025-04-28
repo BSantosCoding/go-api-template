@@ -28,7 +28,7 @@ func NewUserRepo(db *pgxpool.Pool) *UserRepo {
 var _ storage.UserRepository = (*UserRepo)(nil)
 
 func (r *UserRepo) GetAll(ctx context.Context) ([]models.User, error) {
-	query := `SELECT id, name, email FROM users ORDER BY name ASC;` // Adjust table/column names if needed
+	query := `SELECT id, name, email FROM users ORDER BY name ASC;`
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		log.Printf("Error querying all users: %v\n", err)
@@ -51,7 +51,7 @@ func (r *UserRepo) GetAll(ctx context.Context) ([]models.User, error) {
 }
 
 func (r *UserRepo) GetByID(ctx context.Context, id *dto.GetUserByIdRequest) (*models.User, error) {
-	query := `SELECT id, name, email FROM users WHERE id = $1;` // Adjust table/column names
+	query := `SELECT id, name, email FROM users WHERE id = $1;`
 	row := r.db.QueryRow(ctx, query, id.ID)
 
 	var user models.User
@@ -124,7 +124,7 @@ func (r *UserRepo) Update(ctx context.Context, user *dto.UpdateUserRequest) (*mo
 }
 
 func (r *UserRepo) Delete(ctx context.Context, id *dto.DeleteUserRequest) error {
-	query := `DELETE FROM users WHERE id = $1;` // Adjust table/column names
+	query := `DELETE FROM users WHERE id = $1;`
 
 	cmdTag, err := r.db.Exec(ctx, query, id.ID)
 	if err != nil {

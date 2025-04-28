@@ -27,7 +27,7 @@ func NewItemRepo(db *pgxpool.Pool) *ItemRepo {
 var _ storage.ItemRepository = (*ItemRepo)(nil)
 
 func (r *ItemRepo) GetAll(ctx context.Context) ([]models.Item, error) {
-	query := `SELECT id, name, description, price FROM items ORDER BY name ASC;` // Adjust table/column names
+	query := `SELECT id, name, description, price FROM items ORDER BY name ASC;`
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		log.Printf("Error querying all items: %v\n", err)
@@ -49,7 +49,7 @@ func (r *ItemRepo) GetAll(ctx context.Context) ([]models.Item, error) {
 }
 
 func (r *ItemRepo) GetByID(ctx context.Context, id string) (*models.Item, error) {
-	query := `SELECT id, name, description, price FROM items WHERE id = $1;` // Adjust table/column names
+	query := `SELECT id, name, description, price FROM items WHERE id = $1;` 
 	row := r.db.QueryRow(ctx, query, id)
 
 	var item models.Item
@@ -67,7 +67,7 @@ func (r *ItemRepo) GetByID(ctx context.Context, id string) (*models.Item, error)
 
 func (r *ItemRepo) Create(ctx context.Context, item *models.Item) error {
 	// Assuming ID is provided
-	query := `INSERT INTO items (id, name, description, price) VALUES ($1, $2, $3, $4);` // Adjust table/column names
+	query := `INSERT INTO items (id, name, description, price) VALUES ($1, $2, $3, $4);` 
 
 	_, err := r.db.Exec(ctx, query, item.ID, item.Name, item.Description, item.Price)
 	if err != nil {
@@ -83,7 +83,7 @@ func (r *ItemRepo) Create(ctx context.Context, item *models.Item) error {
 }
 
 func (r *ItemRepo) Update(ctx context.Context, id string, item *models.Item) error {
-	query := `UPDATE items SET name = $1, description = $2, price = $3 WHERE id = $4;` // Adjust table/column names
+	query := `UPDATE items SET name = $1, description = $2, price = $3 WHERE id = $4;`
 
 	cmdTag, err := r.db.Exec(ctx, query, item.Name, item.Description, item.Price, id)
 	if err != nil {
@@ -99,7 +99,7 @@ func (r *ItemRepo) Update(ctx context.Context, id string, item *models.Item) err
 }
 
 func (r *ItemRepo) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM items WHERE id = $1;` // Adjust table/column names
+	query := `DELETE FROM items WHERE id = $1;` 
 
 	cmdTag, err := r.db.Exec(ctx, query, id)
 	if err != nil {

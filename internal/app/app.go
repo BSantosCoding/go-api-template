@@ -17,5 +17,5 @@ type Application struct {
 	ItemRepo storage.ItemRepository
 	Validator *validator.Validate
 	// Add other repositories 
-	// Add services maybe
+	// Add services maybe (how to decide on this?)
 }

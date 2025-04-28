@@ -4,7 +4,6 @@ version: '3.8'
 services:
   # PostgreSQL Database Service
   db:
-    # ... (db service definition remains the same) ...
     image: postgres:15-alpine
     container_name: go_api_db
     environment:

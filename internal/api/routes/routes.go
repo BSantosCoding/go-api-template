@@ -21,7 +21,7 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 
 	//Create handlers
 	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator)
-	itemHandler := handlers.NewItemHandler(app.ItemRepo, app.Validator) // Assuming similar refactor for items
+	itemHandler := handlers.NewItemHandler(app.ItemRepo, app.Validator)
 
 
 	// --- Register Resource Routes ---
@@ -31,13 +31,7 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	// --- Health Check ---
 	router.GET("/health", handlers.HealthCheck)
 
-	// --- Swagger Route ---
-	// REMOVED: swaggerURL construction
-
-	log.Println("Configuring Swagger UI handler") // Optional log message
-
+	log.Println("Configuring Swagger UI handler") 
 	// Register the Swagger UI handler WITHOUT the explicit URL option.
-	// It will now load doc.json from a relative path (e.g., /swagger/doc.json)
-	// and infer the host/port from the current browser location.
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }

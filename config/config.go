@@ -68,7 +68,7 @@ func Load() (*Config, error) {
 	}
 
 	// --- Bind Environment Variables ---
-	viper.SetEnvPrefix("API") // Example: API_CORS_ALLOWED_ORIGINS
+	viper.SetEnvPrefix("API")
 	viper.AutomaticEnv()
 	// Allow environment variable CORS_ALLOWED_ORIGINS to override (comma-separated string)
 	viper.BindEnv("cors.allowed_origins", "CORS_ALLOWED_ORIGINS")

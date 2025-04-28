@@ -1,11 +1,9 @@
-// /home/bsant/testing/go-api-template/internal/models/models.go
 package models
 
 import (
-	"time" // Import time package
+	"time"
 
-	"github.com/google/uuid" // Import a UUID package
-	// You might need other imports depending on types used (e.g., shopspring/decimal)
+	"github.com/google/uuid"
 )
 
 // User represents a user in the system

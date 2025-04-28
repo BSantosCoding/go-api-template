@@ -1,4 +1,3 @@
-// internal/server/server.go (Modified)
 package server
 
 import (
@@ -6,13 +5,11 @@ import (
 	"log"
 	"time"
 
-	// "go-api-template/config" // Config is now in the app container
 	"go-api-template/internal/api/routes"
-	"go-api-template/internal/app" // Import the container
+	"go-api-template/internal/app"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	// No longer need pgxpool or storage interfaces directly here
 )
 
 type Server struct {
@@ -20,7 +17,6 @@ type Server struct {
 	app    *app.Application // Store the application container
 }
 
-// NewServer now accepts the application container
 func NewServer(app *app.Application) *Server {
 	router := gin.Default()
 	

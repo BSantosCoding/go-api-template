@@ -1,4 +1,3 @@
-// /home/bsant/testing/go-api-template/internal/api/handlers/users.go
 package handlers
 
 import (
@@ -11,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
-	"github.com/google/uuid" // Example for generating IDs if needed
+	"github.com/google/uuid"
 )
 
 // UserHandler holds the repository dependency for user operations

@@ -10,9 +10,6 @@ export
 
 # Variables
 MIGRATIONS_DIR := internal/database/migrations
-# Ensure DATABASE_URL is set in your environment. Example:
-# export DATABASE_URL='postgres://your_user:your_password@your_host:your_port/your_db_name?sslmode=disable'
-# We check for its existence in relevant targets.
 
 # --- Tool Check Variables ---
 MIGRATE_CMD := $(shell command -v migrate 2> /dev/null)

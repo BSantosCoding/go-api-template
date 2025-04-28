@@ -1,4 +1,3 @@
-// internal/api/handlers/interfaces.go (or similar)
 package handlers
 
 import "github.com/gin-gonic/gin"

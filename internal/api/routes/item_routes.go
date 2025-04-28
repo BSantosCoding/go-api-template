@@ -2,7 +2,7 @@ package routes
 
 import (
 	"go-api-template/internal/api/handlers"
-	// Need storage interface
+
 	"github.com/gin-gonic/gin"
 )
 

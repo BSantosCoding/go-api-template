@@ -7,7 +7,6 @@ func formatValidationErrors(errs validator.ValidationErrors) map[string]string {
     for _, err := range errs {
         // Customize error messages based on tag and field
         errors[err.Field()] = "Field validation for '" + err.Field() + "' failed on the '" + err.Tag() + "' tag"
-        // Example customization:
         // switch err.Tag() {
         // case "required":
         // 	errors[err.Field()] = err.Field() + " is required"

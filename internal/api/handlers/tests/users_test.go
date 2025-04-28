@@ -1,11 +1,10 @@
-// internal/api/routes/users_test.go
-package routes_test // Use _test package convention
+package routes_test
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go-api-template/internal/api/handlers" // Adjust import path
+	"go-api-template/internal/api/handlers"
 	"go-api-template/internal/api/routes"
 	"go-api-template/internal/models"
 	"go-api-template/internal/storage"
@@ -15,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	// Adjust import path
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
 	"github.com/google/uuid"

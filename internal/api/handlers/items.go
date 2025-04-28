@@ -7,11 +7,11 @@ import (
 	"net/http"
 
 	"go-api-template/internal/models"
-	"go-api-template/internal/storage" // Use the interface package
+	"go-api-template/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
-	"github.com/google/uuid" // Example for generating IDs if needed
+	"github.com/google/uuid"
 )
 
 // ItemHandler holds the repository dependency for item operations
