@@ -2,16 +2,12 @@ package routes
 
 import (
 	"go-api-template/internal/api/handlers"
-	"go-api-template/internal/storage" // Need storage interface
-
+	// Need storage interface
 	"github.com/gin-gonic/gin"
-	"github.com/go-playground/validator"
 )
 
 // registerItemRoutes registers all routes related to items
-func registerItemRoutes(rg *gin.RouterGroup, itemRepo storage.ItemRepository, validate *validator.Validate) {
-	// Create the handler specific to this resource
-	itemHandler := handlers.NewItemHandler(itemRepo, validate)
+func RegisterItemRoutes(rg *gin.RouterGroup, itemHandler handlers.ItemHandlerInterface) {
 
 	// Define the sub-group for items (e.g., /api/v1/items)
 	items := rg.Group("/items")

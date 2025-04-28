@@ -19,9 +19,14 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	// --- Base API Group ---
 	apiV1 := router.Group("/api/v1")
 
+	//Create handlers
+	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator)
+	itemHandler := handlers.NewItemHandler(app.ItemRepo, app.Validator) // Assuming similar refactor for items
+
+
 	// --- Register Resource Routes ---
-	registerUserRoutes(apiV1, app.UserRepo, app.Validator)
-	registerItemRoutes(apiV1, app.ItemRepo, app.Validator)
+	RegisterUserRoutes(apiV1, userHandler)
+	RegisterItemRoutes(apiV1, itemHandler)
 
 	// --- Health Check ---
 	router.GET("/health", handlers.HealthCheck)
