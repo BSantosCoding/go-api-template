@@ -5,6 +5,7 @@ import (
 	"go-api-template/config"
 	"go-api-template/internal/storage"
 
+	"github.com/go-playground/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,6 +15,7 @@ type Application struct {
 	DBPool   *pgxpool.Pool
 	UserRepo storage.UserRepository
 	ItemRepo storage.ItemRepository
+	Validator *validator.Validate
 	// Add other repositories 
 	// Add services maybe
 }

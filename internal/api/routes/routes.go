@@ -20,8 +20,8 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	apiV1 := router.Group("/api/v1")
 
 	// --- Register Resource Routes ---
-	registerUserRoutes(apiV1, app.UserRepo)
-	registerItemRoutes(apiV1, app.ItemRepo)
+	registerUserRoutes(apiV1, app.UserRepo, app.Validator)
+	registerItemRoutes(apiV1, app.ItemRepo, app.Validator)
 
 	// --- Health Check ---
 	router.GET("/health", handlers.HealthCheck)

@@ -19,9 +19,6 @@ type User struct {
 	// Assuming 'email' in DB is VARCHAR/TEXT UNIQUE NOT NULL
 	Email string `json:"email" db:"email"`
 
-	// Assuming 'last_login' in DB is TIMESTAMPTZ NULLABLE
-	LastLogin *time.Time `json:"last_login,omitempty" db:"last_login"` // Pointer for NULLable time
-
 	// Assuming 'created_at' in DB is TIMESTAMPTZ NOT NULL
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 

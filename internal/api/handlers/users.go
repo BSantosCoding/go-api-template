@@ -6,21 +6,23 @@ import (
 	"log"
 	"net/http"
 
-	"go-api-template/internal/models"
 	"go-api-template/internal/storage" // Use the interface package
+	"go-api-template/internal/transport/dto"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator"
 	"github.com/google/uuid" // Example for generating IDs if needed
 )
 
 // UserHandler holds the repository dependency for user operations
 type UserHandler struct {
 	repo storage.UserRepository
+	validator *validator.Validate
 }
 
 // NewUserHandler creates a new UserHandler with the given repository
-func NewUserHandler(repo storage.UserRepository) *UserHandler {
-	return &UserHandler{repo: repo}
+func NewUserHandler(repo storage.UserRepository, validate *validator.Validate) *UserHandler {
+	return &UserHandler{repo: repo, validator: validate}
 }
 
 // GetUsers godoc
@@ -57,7 +59,18 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 func (h *UserHandler) GetUserByID(c *gin.Context) {
 	id := c.Param("id") // Get ID from URL path
 
-	user, err := h.repo.GetByID(c.Request.Context(), id) // Use h.repo
+	//Input validation
+	var req dto.GetUserByIdRequest
+	req.ID = uuid.MustParse(id)
+
+	if err := h.validator.Struct(req); err != nil {
+        // Handle validation errors
+        validationErrors := err.(validator.ValidationErrors)
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": formatValidationErrors(validationErrors)})
+        return
+    }
+
+	user, err := h.repo.GetByID(c.Request.Context(), &req) // Use h.repo
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -83,30 +96,28 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /users [post]
 func (h *UserHandler) CreateUser(c *gin.Context) {
-	var newUser models.User
+	//Input validation
+	var newUser dto.CreateUserRequest
 
-	// Bind JSON request body to the newUser struct
 	if err := c.ShouldBindJSON(&newUser); err != nil {
-		log.Printf("Error binding user JSON: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
-	}
+        // Handle malformed JSON or incorrect types
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+        return
+    }
 
-	// --- ID Generation Strategy ---
-	// If the client provides the ID, use newUser.ID directly.
-	// If the server generates the ID (e.g., UUID):
-	if newUser.ID.String() == "" { // Example: Generate UUID if ID is empty
+	if err := h.validator.Struct(newUser); err != nil {
+        // Handle validation errors
+        validationErrors := err.(validator.ValidationErrors)
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": formatValidationErrors(validationErrors)})
+        return
+    }
+
+	//Generate ID if needed
+	if newUser.ID == uuid.Nil {
 		newUser.ID = uuid.New()
 	}
-	// If using SERIAL in DB, you'd modify repo.Create to return the ID
 
-	// Validate required fields (example)
-	if newUser.Name == "" || newUser.Email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Name and Email are required"})
-		return
-	}
-
-	err := h.repo.Create(c.Request.Context(), &newUser) // Use h.repo
+	createdUser, err := h.repo.Create(c.Request.Context(), &newUser) // Use h.repo
 	if err != nil {
 		if errors.Is(err, storage.ErrConflict) {
 			c.JSON(http.StatusConflict, gin.H{"error": "User with this ID or email already exists"})
@@ -117,8 +128,8 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// Return the created user (or just status Created)
-	c.JSON(http.StatusCreated, newUser)
+	// Return the created user
+	c.JSON(http.StatusCreated, createdUser)
 }
 
 // UpdateUser godoc
@@ -137,22 +148,24 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 // @Router       /users/{id} [put]
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
-	var userUpdates models.User
+	//Input validation
+	var userUpdates dto.UpdateUserRequest
 
 	if err := c.ShouldBindJSON(&userUpdates); err != nil {
-		log.Printf("Error binding user update JSON: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
-	}
+        // Handle malformed JSON or incorrect types
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+        return
+    }
+	userUpdates.ID = uuid.MustParse(id)
 
-	// Basic validation
-	if userUpdates.Name == "" || userUpdates.Email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Name and Email are required"})
-		return
-	}
+	if err := h.validator.Struct(userUpdates); err != nil {
+        // Handle validation errors
+        validationErrors := err.(validator.ValidationErrors)
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": formatValidationErrors(validationErrors)})
+        return
+    }
 
-	// Note: userUpdates.ID will be ignored by the repository method, which uses the 'id' from the URL.
-	err := h.repo.Update(c.Request.Context(), id, &userUpdates) // Use h.repo
+	updatedUser, err := h.repo.Update(c.Request.Context(), &userUpdates) // Use h.repo
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -165,11 +178,8 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// Optionally fetch and return the updated user, or just return No Content / OK
-	// For simplicity, returning OK here. Fetching requires another DB call.
-	// userUpdates.ID = id // Set the ID for the response if needed
-	// c.JSON(http.StatusOK, userUpdates)
-	c.Status(http.StatusOK) // Or http.StatusNoContent if nothing is returned
+	// Return the updated user
+	c.JSON(http.StatusOK, updatedUser) 
 }
 
 // DeleteUser godoc
@@ -186,7 +196,18 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id := c.Param("id")
 
-	err := h.repo.Delete(c.Request.Context(), id) // Use h.repo
+	//Input validation
+	var userDelete dto.DeleteUserRequest
+	userDelete.ID = uuid.MustParse(id)
+
+	if err := h.validator.Struct(userDelete); err != nil {
+        // Handle validation errors
+        validationErrors := err.(validator.ValidationErrors)
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": formatValidationErrors(validationErrors)})
+        return
+    }
+
+	err := h.repo.Delete(c.Request.Context(), &userDelete) // Use h.repo
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})

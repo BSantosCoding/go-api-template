@@ -10,17 +10,19 @@ import (
 	"go-api-template/internal/storage" // Use the interface package
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator"
 	"github.com/google/uuid" // Example for generating IDs if needed
 )
 
 // ItemHandler holds the repository dependency for item operations
 type ItemHandler struct {
 	repo storage.ItemRepository
+	validator *validator.Validate
 }
 
 // NewItemHandler creates a new ItemHandler with the given repository
-func NewItemHandler(repo storage.ItemRepository) *ItemHandler {
-	return &ItemHandler{repo: repo}
+func NewItemHandler(repo storage.ItemRepository, validate *validator.Validate) *ItemHandler {
+	return &ItemHandler{repo: repo, validator: validate}
 }
 
 // GetItems godoc

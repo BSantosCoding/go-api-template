@@ -17,11 +17,14 @@ RUN go mod download
 # Copy the rest of the application source code
 COPY . .
 
+# Mark the directory as safe for git operations
+RUN git config --global --add safe.directory /app
+
 # Install development tools (air, swag, migrate)
 # These are installed in the builder stage, migrate CLI will be copied to final stage
-RUN go install github.com/air-verse/air@latest
-RUN go install github.com/swaggo/swag/cmd/swag@latest
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+RUN go install -buildvcs=false github.com/air-verse/air@latest
+RUN go install -buildvcs=false github.com/swaggo/swag/cmd/swag@latest
+RUN go install -buildvcs=false -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Generate Swagger docs before building
 # Ensure swag annotations are correct before this step
@@ -30,7 +33,7 @@ RUN swag init -g main.go
 # Build the Go application
 # -ldflags="-w -s" strips debug information and symbols for a smaller binary
 # CGO_ENABLED=0 disables CGO for static linking (usually good for Alpine)
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /app/main .
+RUN CGO_ENABLED=0 go build -buildvcs=false -ldflags="-w -s" -o /app/main .
 
 
 # ---- Runtime Stage ----

@@ -12,6 +12,8 @@ import (
 	"go-api-template/internal/storage/postgres"
 
 	_ "go-api-template/docs" // Import generated docs (will be created by swag init)
+
+	"github.com/go-playground/validator"
 )
 
 // @title           Go API Template API
@@ -45,11 +47,14 @@ func main() {
 	userRepo := postgres.NewUserRepo(dbPool)
 	itemRepo := postgres.NewItemRepo(dbPool)
 
+	validate := validator.New()
+
 	application := &app.Application{
 		Config:   cfg,
 		DBPool:   dbPool,
 		UserRepo: userRepo,
 		ItemRepo: itemRepo,
+		Validator: validate,
 	}
 
 	srv := server.NewServer(application)
