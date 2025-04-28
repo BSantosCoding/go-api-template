@@ -131,6 +131,8 @@ docker-build-nocache: ## Build or rebuild the docker images using docker-compose
 docker-up: ## Start services in the background using docker-compose
 	@echo "Starting Docker services (db, api)..."
 	@docker-compose up -d --remove-orphans
+	@echo "Running migrations on the api..."
+	@make docker-migrate-up
 	@echo "Services started. API should be available shortly."
 	@make docker-logs # Show logs briefly after starting
 
