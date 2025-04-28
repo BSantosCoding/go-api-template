@@ -189,10 +189,6 @@ func TestUserHandler_GetUsers(t *testing.T) {
 		err := json.Unmarshal(recorder.Body.Bytes(), &responseUsers)
 		assert.NoError(t, err)
 
-		// --- MODIFIED ASSERTION ---
-		// Don't compare slices directly due to time.Time issues
-		// assert.Equal(t, expectedUsers, responseUsers) // REMOVE THIS
-
 		// Compare length first
 		assert.Len(t, responseUsers, len(expectedUsers), "Number of users should match")
 
