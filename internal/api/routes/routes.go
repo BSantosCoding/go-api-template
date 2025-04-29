@@ -22,14 +22,16 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 
 	//Create handlers
 	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator, app.Config.JWT.Secret, app.Config.JWT.Expiration)
-	itemHandler := handlers.NewItemHandler(app.ItemRepo, app.Validator)
+	jobHandler := handlers.NewJobHandler(app.JobRepo, app.Validator)
+	invoiceHandler := handlers.NewInvoiceHandler(app.InvoiceRepo, app.JobRepo, app.Validator)
 
 	// --- Middleware ---
 	authMiddleware := middleware.JWTAuthMiddleware(app.Config.JWT.Secret)
 
 	// --- Register Resource Routes ---
 	RegisterUserRoutes(apiV1, userHandler, authMiddleware)
-	RegisterItemRoutes(apiV1, itemHandler)
+	RegisterInvoiceRoutes(apiV1, invoiceHandler, authMiddleware)
+	RegisterJobRoutes(apiV1, jobHandler, authMiddleware)
 
 	// --- Health Check ---
 	router.GET("/health", handlers.HealthCheck)

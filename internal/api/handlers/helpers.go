@@ -46,3 +46,61 @@ func MapUserModelToUserResponse(user *models.User) dto.UserResponse {
 		UpdatedAt: user.UpdatedAt,
 	}
 }
+
+// MapJobModelToJobResponse converts a models.Job to a dto.JobResponse
+func MapJobModelToJobResponse(job *models.Job) dto.JobResponse {
+	// ... (implementation from previous step) ...
+	resp := dto.JobResponse{
+		ID:              job.ID,
+		Rate:            job.Rate,
+		Duration:        job.Duration,
+		ContractorID:    job.ContractorID,
+		EmployerID:      job.EmployerID,
+		State:           string(job.State), // Convert enum to string
+		InvoiceInterval: job.InvoiceInterval,
+		CreatedAt:       job.CreatedAt,
+		UpdatedAt:       job.UpdatedAt,
+	}
+	return resp
+}
+
+// isValidJobStateTransition checks if moving from current to next state is allowed.
+func isValidJobStateTransition(current, next models.JobState) bool {
+	switch current {
+	case models.JobStateWaiting: // Assuming 'Waiting' is the initial state before 'Ongoing'
+		return next == models.JobStateOngoing
+	case models.JobStateOngoing:
+		return next == models.JobStateComplete
+	case models.JobStateComplete:
+		return next == models.JobStateArchived
+	case models.JobStateArchived:
+		return false // Cannot transition from Archived
+	default:
+		return false
+	}
+}
+
+// MapInvoiceModelToInvoiceResponse converts a models.Invoice to a dto.InvoiceResponse
+func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceResponse {
+	return dto.InvoiceResponse{
+		ID:             invoice.ID,
+		Value:          invoice.Value,
+		State:          string(invoice.State), // Convert enum to string
+		JobID:          invoice.JobID,
+		IntervalNumber: invoice.IntervalNumber,
+		CreatedAt:      invoice.CreatedAt,
+		UpdatedAt:      invoice.UpdatedAt,
+	}
+}
+
+// isValidInvoiceStateTransition checks if moving from current to next state is allowed.
+func isValidInvoiceStateTransition(current, next models.InvoiceState) bool {
+	switch current {
+	case models.InvoiceStateWaiting:
+		return next == models.InvoiceStateComplete
+	case models.InvoiceStateComplete:
+		return false // Cannot transition from Complete
+	default:
+		return false
+	}
+}

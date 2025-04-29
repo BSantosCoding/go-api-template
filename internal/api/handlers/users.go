@@ -38,6 +38,7 @@ func NewUserHandler(repo storage.UserRepository, validate *validator.Validate, j
 // @Success      200  {array}   dto.UserResponse "Successfully retrieved list of users" // UPDATED response type
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /users [get]
+// @Security     BearerAuth
 func (h *UserHandler) GetUsers(c *gin.Context) {
 	users, err := h.repo.GetAll(c.Request.Context()) // Use h.repo and pass context
 	if err != nil {
@@ -67,6 +68,7 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 // @Failure      404  {object}  map[string]string{error=string} "User Not Found"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /users/{id} [get]
+// @Security     BearerAuth
 func (h *UserHandler) GetUserByID(c *gin.Context) {
 	idStr := c.Param("id") // Get ID from URL path as string
 
@@ -233,6 +235,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 // @Failure      409  {object}  map[string]string{error=string} "Conflict - e.g., duplicate email"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /users/{id} [put]
+// @Security     BearerAuth
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	idStr := c.Param("id")
 
@@ -285,6 +288,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 // @Failure      404  {object}  map[string]string{error=string} "User Not Found"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /users/{id} [delete]
+// @Security     BearerAuth
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id := c.Param("id")
 

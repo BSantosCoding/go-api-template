@@ -1,6 +1,6 @@
 -- Up migration for creating the users table
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY, -- Using TEXT for potential UUIDs, use SERIAL if you prefer auto-incrementing integers
+    id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL, -- Ensure emails are unique
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
