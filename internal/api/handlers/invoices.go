@@ -342,7 +342,7 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 // @Success      200 {object}  dto.InvoiceResponse "Invoice state updated successfully"
 // @Failure      400 {object}  map[string]string "Bad Request - Invalid input or state transition not allowed"
 // @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the contractor for this invoice's job" // CHANGED
+// @Failure      403 {object}  map[string]string "Forbidden - User is not the contractor for this invoice's job"
 // @Failure      404 {object}  map[string]string "Invoice Not Found"
 // @Failure      500 {object}  map[string]string "Internal Server Error"
 // @Router       /invoices/{id}/state [patch]
@@ -403,7 +403,7 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 	isContractor := job.ContractorID != nil && *job.ContractorID == userID
 	if !isContractor {
 		log.Printf("UpdateInvoiceState: Forbidden attempt by user %s (not contractor %v) for invoice %s", userID, job.ContractorID, invoiceID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can update the invoice state"}) // CHANGED Message
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can update the invoice state"})
 		return
 	}
 	// --- End Auth Check ---
@@ -441,7 +441,7 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 // @Success      204 {object}  nil "Invoice deleted successfully"
 // @Failure      400 {object}  map[string]string "Invalid ID format"
 // @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not contractor or invoice state prevents deletion" // CHANGED
+// @Failure      403 {object}  map[string]string "Forbidden - User is not contractor or invoice state prevents deletion"
 // @Failure      404 {object}  map[string]string "Invoice Not Found"
 // @Failure      500 {object}  map[string]string "Internal Server Error"
 // @Router       /invoices/{id} [delete]
@@ -489,7 +489,7 @@ func (h *InvoiceHandler) DeleteInvoice(c *gin.Context) {
 	isContractor := job.ContractorID != nil && *job.ContractorID == userID
 	if !isContractor {
 		log.Printf("DeleteInvoice: Forbidden attempt by user %s (not contractor %v) for invoice %s", userID, job.ContractorID, invoiceID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can delete this invoice"}) // CHANGED Message
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can delete this invoice"})
 		return
 	}
 	if invoice.State != models.InvoiceStateWaiting {

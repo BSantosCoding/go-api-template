@@ -224,7 +224,7 @@ func (r *InvoiceRepo) Delete(ctx context.Context, req *dto.DeleteInvoiceRequest)
 }
 
 // GetMaxIntervalForJob retrieves the highest interval number for a given job.
-func (r *InvoiceRepo) GetMaxIntervalForJob(ctx context.Context, req *dto.GetMaxIntervalForJobRequest) (int, error) { // CHANGED: Accepts DTO
+func (r *InvoiceRepo) GetMaxIntervalForJob(ctx context.Context, req *dto.GetMaxIntervalForJobRequest) (int, error) {
 	var maxInterval sql.NullInt32
 	query := `SELECT MAX(interval_number) FROM invoices WHERE job_id = $1`
 

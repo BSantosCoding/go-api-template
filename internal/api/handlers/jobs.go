@@ -95,7 +95,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 // @Param        id path      string true  "Job ID" Format(uuid)
 // @Success      200 {object}  dto.JobResponse "Successfully retrieved job"
 // @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized" // Added as it's a protected route
+// @Failure      401 {object}  map[string]string "Unauthorized"
 // @Failure      404 {object}  map[string]string "Job Not Found"
 // @Failure      500 {object}  map[string]string "Internal Server Error"
 // @Router       /jobs/{id} [get]

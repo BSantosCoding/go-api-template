@@ -5,11 +5,10 @@ CREATE TABLE invoices (
     value NUMERIC(12, 2) NOT NULL CHECK (value >= 0),
     state invoice_state NOT NULL DEFAULT 'Waiting',
     job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-    interval_number INTEGER NOT NULL CHECK (interval_number > 0), -- ADDED: Which interval (1, 2, ...)
+    interval_number INTEGER NOT NULL CHECK (interval_number > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- ADDED: Ensure only one invoice exists per interval for a given job
     CONSTRAINT unique_job_interval UNIQUE (job_id, interval_number)
 );
 

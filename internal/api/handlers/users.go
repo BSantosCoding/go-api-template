@@ -110,7 +110,7 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 // @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
 // @Failure      409  {object}  map[string]string{error=string} "Conflict - Email already exists"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/register [post] // Changed route example
+// @Router       /auth/register [post]
 func (h *UserHandler) Register(c *gin.Context) {
 	var req dto.CreateUserRequest
 
@@ -159,7 +159,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 // @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
 // @Failure      401  {object}  map[string]string{error=string} "Unauthorized - Invalid credentials"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/login [post] // Changed route example
+// @Router       /auth/login [post]
 func (h *UserHandler) Login(c *gin.Context) {
 	var req dto.LoginRequest
 
