@@ -17,6 +17,9 @@ type User struct {
 	// Assuming 'email' in DB is VARCHAR/TEXT UNIQUE NOT NULL
 	Email string `json:"email" db:"email"`
 
+	// Assuming 'password_hash' in DB is VARCHAR/TEXT NOT NULL
+	PasswordHash string    `json:"-" db:"password_hash"`
+
 	// Assuming 'created_at' in DB is TIMESTAMPTZ NOT NULL
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 

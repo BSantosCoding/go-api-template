@@ -1,6 +1,7 @@
 package routes_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,36 +20,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// MockUserHandler is a mock implementation of UserHandlerInterface
-type MockUserHandler struct {
+// MockUserHandler for route registration test ONLY
+type MockRouteTestUserHandler struct {
 	mock.Mock
 }
+func (m *MockRouteTestUserHandler) GetUserByID(c *gin.Context) { m.Called(c) }
+func (m *MockRouteTestUserHandler) GetUsers(c *gin.Context)    { m.Called(c) }
+func (m *MockRouteTestUserHandler) Register(c *gin.Context)    { m.Called(c) }
+func (m *MockRouteTestUserHandler) Login(c *gin.Context)       { m.Called(c) }
+func (m *MockRouteTestUserHandler) UpdateUser(c *gin.Context)  { m.Called(c) }
+func (m *MockRouteTestUserHandler) DeleteUser(c *gin.Context)  { m.Called(c) }
 
-// Implement the interface methods for the mock
-func (m *MockUserHandler) GetUserByID(c *gin.Context) {
-	m.Called(c) // Record that the method was called
-}
-
-func (m *MockUserHandler) GetUsers(c *gin.Context) {
-	m.Called(c)
-}
-
-func (m *MockUserHandler) CreateUser(c *gin.Context) {
-	m.Called(c)
-}
-
-func (m *MockUserHandler) UpdateUser(c *gin.Context) {
-	m.Called(c)
-}
-
-func (m *MockUserHandler) DeleteUser(c *gin.Context) {
-	m.Called(c)
-}
-
-// Ensure MockUserHandler implements the interface (compile-time check)
-var _ handlers.UserHandlerInterface = (*MockUserHandler)(nil)
+// Ensure mock implements the interface
+var _ handlers.UserHandlerInterface = (*MockRouteTestUserHandler)(nil)
 
 // MockUserRepository is a mock type for the storage.UserRepository interface
 type MockUserRepository struct {
@@ -69,6 +56,14 @@ func (m *MockUserRepository) GetAll(ctx context.Context) ([]models.User, error) 
 	// Fallback or error if type assertion fails unexpectedly
 	return nil, errors.New("mock return value type mismatch for []models.User")
 
+}
+
+func (m *MockUserRepository) GetByEmail(ctx context.Context, req *dto.GetUserByEmailRequest) (*models.User, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
 }
 
 func (m *MockUserRepository) GetByID(ctx context.Context, req *dto.GetUserByIdRequest) (*models.User, error) {
@@ -119,10 +114,10 @@ func TestRegisterUserRoutes(t *testing.T) {
 	// Arrange
 	gin.SetMode(gin.TestMode) // Set Gin to test mode
 
-	mockHandler := new(MockUserHandler) // Create instance of the mock handler
+	mockHandler := new(MockRouteTestUserHandler) // Create instance of the mock handler
 
 	router := gin.New()              // Create a new Gin engine for testing
-	testGroup := router.Group("/api") // Create a base group similar to potential real setup
+	testGroup := router.Group("/api/v1") // Create a base group similar to potential real setup
 
 	// Act
 	routes.RegisterUserRoutes(testGroup, mockHandler) // Call the function under test
@@ -133,11 +128,14 @@ func TestRegisterUserRoutes(t *testing.T) {
 		Method string
 		Path   string
 	}{
-		{http.MethodGet, "/api/users/:id"},
-		{http.MethodGet, "/api/users/"},
-		{http.MethodPost, "/api/users/"},
-		{http.MethodPut, "/api/users/:id"},
-		{http.MethodDelete, "/api/users/:id"},
+		// Auth routes
+		{http.MethodPost, "/api/v1/auth/register"},
+		{http.MethodPost, "/api/v1/auth/login"},
+		// User CRUD routes
+		{http.MethodGet, "/api/v1/users/"},
+		{http.MethodGet, "/api/v1/users/:id"},
+		{http.MethodPut, "/api/v1/users/:id"},
+		{http.MethodDelete, "/api/v1/users/:id"},
 	}
 
 	registeredRoutes := router.Routes()
@@ -159,88 +157,372 @@ func TestRegisterUserRoutes(t *testing.T) {
 	}
 }
 
-func TestUserHandler_GetUsers(t *testing.T) {
-	router, mockRepo, handler := setupTestRouterWithUserMocks()
-	// If testing handlers directly, you don't need the router part here,
-	// just call handler.GetUsers directly with a test context.
-	// Assuming you are testing via HTTP requests as per previous examples:
-	router.GET("/users", handler.GetUsers)
+// --- Handler Tests ---
+
+func TestUserHandler_Register(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
-		// Arrange
-		now := time.Now() // Use a fixed time for comparison if needed, or just compare instants
-		expectedUsers := []models.User{
-			{ID: uuid.New(), Name: "User 1", Email: "user1@example.com", CreatedAt: now, UpdatedAt: now},
-			{ID: uuid.New(), Name: "User 2", Email: "user2@example.com", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}, // Example with different times
-		}
-		mockRepo.On("GetAll", mock.Anything).Return(expectedUsers, nil).Once()
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/register", handler.Register)
 
-		// Act
+		reqBody := dto.CreateUserRequest{
+			Name:     "Test User",
+			Email:    "test@example.com",
+			Password: "password123",
+		}
+		mockUserID := uuid.New()
+		now := time.Now()
+		mockUser := &models.User{
+			ID:           mockUserID,
+			Name:         reqBody.Name,
+			Email:        reqBody.Email,
+			PasswordHash: "hashed_password_ignored_in_response",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		mockRepo.On("Create", mock.Anything, &reqBody).Return(mockUser, nil).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+		var resp dto.UserResponse
+		err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, mockUserID, resp.ID)
+		assert.Equal(t, reqBody.Name, resp.Name)
+		assert.Equal(t, reqBody.Email, resp.Email)
+		assert.WithinDuration(t, now, resp.CreatedAt, time.Second)
+		assert.WithinDuration(t, now, resp.UpdatedAt, time.Second)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Validation Error", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/register", handler.Register)
+
+		reqBody := dto.CreateUserRequest{ Name: "Test" } // Missing required fields
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Validation failed")
+		assert.Contains(t, recorder.Body.String(), "Email")
+		assert.Contains(t, recorder.Body.String(), "Password")
+		mockRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Duplicate Email Error", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/register", handler.Register)
+
+		reqBody := dto.CreateUserRequest{
+			Name:     "Test User",
+			Email:    "duplicate@example.com",
+			Password: "password123",
+		}
+		mockRepo.On("Create", mock.Anything, &reqBody).Return(nil, storage.ErrDuplicateEmail).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusConflict, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Email address already registered")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Internal Server Error on Create", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/register", handler.Register)
+
+		reqBody := dto.CreateUserRequest{
+			Name:     "Test User",
+			Email:    "test-fail@example.com",
+			Password: "password123",
+		}
+		mockRepo.On("Create", mock.Anything, &reqBody).Return(nil, errors.New("database exploded")).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Failed to register user")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestUserHandler_Login(t *testing.T) {
+	testEmail := "login@example.com"
+	testPassword := "password123"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.DefaultCost)
+	mockUserID := uuid.New()
+	now := time.Now()
+	mockUser := &models.User{
+		ID:           mockUserID,
+		Name:         "Login User",
+		Email:        testEmail,
+		PasswordHash: string(hashedPassword),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/login", handler.Login)
+
+		reqBody := dto.LoginRequest{ Email: testEmail, Password: testPassword }
+		emailReq := dto.GetUserByEmailRequest{Email: testEmail}
+		mockRepo.On("GetByEmail", mock.Anything, &emailReq).Return(mockUser, nil).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var resp dto.LoginResponse
+		err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, mockUserID, resp.User.ID)
+		assert.Equal(t, testEmail, resp.User.Email)
+		assert.Empty(t, resp.Token)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("User Not Found", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/login", handler.Login)
+
+		reqBody := dto.LoginRequest{ Email: "notfound@example.com", Password: testPassword }
+		emailReq := dto.GetUserByEmailRequest{Email: "notfound@example.com"}
+		mockRepo.On("GetByEmail", mock.Anything, &emailReq).Return(nil, storage.ErrNotFound).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid email or password")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Incorrect Password", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/login", handler.Login)
+
+		reqBody := dto.LoginRequest{ Email: testEmail, Password: "wrongpassword" }
+		emailReq := dto.GetUserByEmailRequest{Email: testEmail}
+		mockRepo.On("GetByEmail", mock.Anything, &emailReq).Return(mockUser, nil).Once() // Still returns user
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid email or password")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Validation Error", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/login", handler.Login)
+
+		reqBody := dto.LoginRequest{ Email: "invalid-email", Password: testPassword }
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Validation failed")
+		assert.Contains(t, recorder.Body.String(), "Email")
+		mockRepo.AssertNotCalled(t, "GetByEmail", mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Internal Server Error on GetByEmail", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.POST("/auth/login", handler.Login)
+
+		reqBody := dto.LoginRequest{ Email: testEmail, Password: testPassword }
+		emailReq := dto.GetUserByEmailRequest{Email: testEmail}
+		mockRepo.On("GetByEmail", mock.Anything, &emailReq).Return(nil, errors.New("db connection lost")).Once()
+
+		bodyBytes, _ := json.Marshal(reqBody)
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(bodyBytes))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Login failed")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestUserHandler_GetUsers(t *testing.T) {
+
+	t.Run("Success", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users", handler.GetUsers)
+
+		now := time.Now()
+		mockUsers := []models.User{ // Data returned by mock repo
+			{ID: uuid.New(), Name: "User 1", Email: "user1@example.com", CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New(), Name: "User 2", Email: "user2@example.com", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)},
+		}
+		// Define expected DTOs based on mock data
+		expectedResponses := []dto.UserResponse{
+			handlers.MapUserModelToUserResponse(&mockUsers[0]),
+			handlers.MapUserModelToUserResponse(&mockUsers[1]),
+		}
+		mockRepo.On("GetAll", mock.Anything).Return(mockUsers, nil).Once()
+
 		recorder := httptest.NewRecorder()
 		request, _ := http.NewRequest(http.MethodGet, "/users", nil)
 		router.ServeHTTP(recorder, request)
 
-		// Assert
 		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		var responseUsers []models.User
-		err := json.Unmarshal(recorder.Body.Bytes(), &responseUsers)
+		var actualResponses []dto.UserResponse
+		err := json.Unmarshal(recorder.Body.Bytes(), &actualResponses)
 		assert.NoError(t, err)
 
-		// Compare length first
-		assert.Len(t, responseUsers, len(expectedUsers), "Number of users should match")
+		// --- Compare slices element by element ---
+		assert.Len(t, actualResponses, len(expectedResponses), "Number of users should match")
 
-		// Compare elements individually
-		for i := range expectedUsers {
-			assert.Equal(t, expectedUsers[i].ID, responseUsers[i].ID, "User ID mismatch at index %d", i)
-			assert.Equal(t, expectedUsers[i].Name, responseUsers[i].Name, "User Name mismatch at index %d", i)
-			assert.Equal(t, expectedUsers[i].Email, responseUsers[i].Email, "User Email mismatch at index %d", i)
-
-			// Compare time instants using time.Equal()
-			assert.True(t, expectedUsers[i].CreatedAt.Equal(responseUsers[i].CreatedAt),
-				"CreatedAt mismatch at index %d. Expected: %v, Got: %v", i, expectedUsers[i].CreatedAt, responseUsers[i].CreatedAt)
-			assert.True(t, expectedUsers[i].UpdatedAt.Equal(responseUsers[i].UpdatedAt),
-				"UpdatedAt mismatch at index %d. Expected: %v, Got: %v", i, expectedUsers[i].UpdatedAt, responseUsers[i].UpdatedAt)
+		// If the order is guaranteed (which it should be based on the mock), compare element by element
+		for i := range expectedResponses {
+			if i >= len(actualResponses) {
+				t.Errorf("Actual responses slice is shorter than expected")
+				break // Avoid index out of range
+			}
+			assert.Equal(t, expectedResponses[i].ID, actualResponses[i].ID, "User ID mismatch at index %d", i)
+			assert.Equal(t, expectedResponses[i].Name, actualResponses[i].Name, "User Name mismatch at index %d", i)
+			assert.Equal(t, expectedResponses[i].Email, actualResponses[i].Email, "User Email mismatch at index %d", i)
+			// Use WithinDuration for time fields
+			assert.WithinDuration(t, expectedResponses[i].CreatedAt, actualResponses[i].CreatedAt, time.Second, "User CreatedAt mismatch at index %d", i)
+			assert.WithinDuration(t, expectedResponses[i].UpdatedAt, actualResponses[i].UpdatedAt, time.Second, "User UpdatedAt mismatch at index %d", i)
 		}
-		// --------------------------
+		// -----------------------------------------
 
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("Success - Empty List", func(t *testing.T) {
-		// Arrange
-		expectedUsers := []models.User{} // Empty slice
-		mockRepo.On("GetAll", mock.Anything).Return(expectedUsers, nil).Once()
+	t.Run("Error", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users", handler.GetUsers)
 
-		// Act
+		mockRepo.On("GetAll", mock.Anything).Return(nil, errors.New("db error")).Once()
+
 		recorder := httptest.NewRecorder()
 		request, _ := http.NewRequest(http.MethodGet, "/users", nil)
 		router.ServeHTTP(recorder, request)
 
-		// Assert
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Failed to retrieve users")
+		mockRepo.AssertExpectations(t)
+	})
+}
 
-		var responseUsers []models.User
-		err := json.Unmarshal(recorder.Body.Bytes(), &responseUsers)
+func TestUserHandler_GetUserByID(t *testing.T) {
+	testID := uuid.New()
+	now := time.Now()
+	mockUser := &models.User{
+		ID:           testID,
+		Name:         "Get User",
+		Email:        "get@example.com",
+		PasswordHash: "somehash",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users/:id", handler.GetUserByID)
+
+		idReq := &dto.GetUserByIdRequest{ID: testID}
+		mockRepo.On("GetByID", mock.Anything, idReq).Return(mockUser, nil).Once()
+
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var resp dto.UserResponse
+		err := json.Unmarshal(recorder.Body.Bytes(), &resp)
 		assert.NoError(t, err)
-		// Direct comparison works for empty slices, but checking length is clearer
-		assert.Len(t, responseUsers, 0)
-		// assert.Equal(t, expectedUsers, responseUsers) // This is also fine for empty
+		assert.Equal(t, testID, resp.ID)
+		assert.Equal(t, mockUser.Name, resp.Name)
+		assert.Equal(t, mockUser.Email, resp.Email)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Not Found", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users/:id", handler.GetUserByID)
+
+		notFoundID := uuid.New()
+		idReq := &dto.GetUserByIdRequest{ID: notFoundID}
+		mockRepo.On("GetByID", mock.Anything, idReq).Return(nil, storage.ErrNotFound).Once()
+
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+notFoundID.String(), nil)
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "User not found")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Invalid ID Format", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users/:id", handler.GetUserByID)
+
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/invalid-uuid", nil)
+		router.ServeHTTP(recorder, request)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid user ID format")
+		mockRepo.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything)
 		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("Internal Server Error", func(t *testing.T) {
-		// Arrange
-		mockRepo.On("GetAll", mock.Anything).Return(nil, errors.New("database error")).Once()
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		router.GET("/users/:id", handler.GetUserByID)
 
-		// Act
+		errorID := uuid.New()
+		idReq := &dto.GetUserByIdRequest{ID: errorID}
+		mockRepo.On("GetByID", mock.Anything, idReq).Return(nil, errors.New("db error")).Once()
+
 		recorder := httptest.NewRecorder()
-		request, _ := http.NewRequest(http.MethodGet, "/users", nil)
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+errorID.String(), nil)
 		router.ServeHTTP(recorder, request)
 
-		// Assert
 		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "Failed to retrieve users")
+		assert.Contains(t, recorder.Body.String(), "Failed to retrieve user")
 		mockRepo.AssertExpectations(t)
 	})
 }

@@ -5,8 +5,9 @@ import "github.com/gin-gonic/gin"
 // UserHandlerInterface defines the methods needed by the user routes.
 type UserHandlerInterface interface {
 	GetUserByID(c *gin.Context)
+	Login(c *gin.Context)
 	GetUsers(c *gin.Context)
-	CreateUser(c *gin.Context)
+	Register(c *gin.Context)
 	UpdateUser(c *gin.Context)
 	DeleteUser(c *gin.Context)
 }

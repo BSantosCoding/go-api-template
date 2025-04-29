@@ -19,7 +19,7 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 # Phony targets (targets that don't represent files)
 .PHONY: help \
 	migrate-create migrate-up migrate-down migrate-down-all migrate-force migrate-status \
-	swagger-gen dev \
+	swagger-gen dev test \
 	install-migrate install-swag install-air \
 	check-migrate check-swag check-air check-db-url
 
@@ -50,6 +50,10 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 	@echo "Generating Swagger documentation..."
 	@$(SWAG_CMD) init -g main.go # Specify main go file explicitly
 	@echo "Swagger documentation generated in ./docs directory."
+
+test: ## Run all Go unit and integration tests
+	@echo "Running Go tests..."
+	@go test -v ./... # Runs tests in current dir and all subdirs recursively
 
 
 # --- Migration Commands ---
@@ -232,12 +236,11 @@ help: ## Display this help screen
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Available development commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen|test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' # Updated grep pattern
 	@echo ""
 	@echo "Available Docker commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Available tool commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'install-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
 

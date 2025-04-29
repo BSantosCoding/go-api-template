@@ -10,6 +10,7 @@ import (
 type UserRepository interface {
 	GetAll(ctx context.Context) ([]models.User, error)
 	GetByID(ctx context.Context, id *dto.GetUserByIdRequest) (*models.User, error)
+	GetByEmail(ctx context.Context, id *dto.GetUserByEmailRequest) (*models.User, error)
 	Create(ctx context.Context, user *dto.CreateUserRequest) (*models.User, error) // Modify to return created user ID or full user if needed
 	Update(ctx context.Context, user *dto.UpdateUserRequest) (*models.User, error) // Modify to return updated user if needed
 	Delete(ctx context.Context, id *dto.DeleteUserRequest) error
