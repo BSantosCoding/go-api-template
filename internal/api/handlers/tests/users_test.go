@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go-api-template/internal/api/handlers"
+	"go-api-template/internal/api/middleware"
 	"go-api-template/internal/api/routes"
 	"go-api-template/internal/models"
 	"go-api-template/internal/storage"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -101,17 +103,20 @@ var _ storage.UserRepository = (*MockUserRepository)(nil)
 
 // --- Helper Function for Setup ---
 
+const testJWTSecret = "test-secret-key-for-unit-tests"
+var testJWTExpiration = 15 * time.Minute
+
 func setupTestRouterWithUserMocks() (*gin.Engine, *MockUserRepository, *handlers.UserHandler) {
 	gin.SetMode(gin.TestMode)
 	mockRepo := new(MockUserRepository)
-	validate := validator.New() // Use real validator
-	handler := handlers.NewUserHandler(mockRepo, validate)
+	validate := validator.New()
+	handler := handlers.NewUserHandler(mockRepo, validate, testJWTSecret, testJWTExpiration)
 	router := gin.New()
 	return router, mockRepo, handler
 }
 
+
 func TestRegisterUserRoutes(t *testing.T) {
-	// Arrange
 	gin.SetMode(gin.TestMode) // Set Gin to test mode
 
 	mockHandler := new(MockRouteTestUserHandler) // Create instance of the mock handler
@@ -119,8 +124,9 @@ func TestRegisterUserRoutes(t *testing.T) {
 	router := gin.New()              // Create a new Gin engine for testing
 	testGroup := router.Group("/api/v1") // Create a base group similar to potential real setup
 
+	testAuthMiddleware := middleware.JWTAuthMiddleware(testJWTSecret) // Mock JWT middleware
 	// Act
-	routes.RegisterUserRoutes(testGroup, mockHandler) // Call the function under test
+	routes.RegisterUserRoutes(testGroup, mockHandler, testAuthMiddleware) // Call the function under test
 
 	// Assert
 	// Check if the expected routes are registered
@@ -300,7 +306,21 @@ func TestUserHandler_Login(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, mockUserID, resp.User.ID)
 		assert.Equal(t, testEmail, resp.User.Email)
-		assert.Empty(t, resp.Token)
+		// Assert token is present and non-empty
+		assert.NotEmpty(t, resp.Token, "Token should not be empty on successful login")
+
+		token, err := jwt.ParseWithClaims(resp.Token, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return []byte(testJWTSecret), nil // Use the same secret used in setup
+		})
+		assert.NoError(t, err, "Token should be parseable")
+		assert.True(t, token.Valid, "Token should be valid")
+		if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok {
+			assert.Equal(t, mockUserID.String(), claims.Subject, "Token subject should match user ID")
+			assert.WithinDuration(t, time.Now().Add(testJWTExpiration), claims.ExpiresAt.Time, 5*time.Second, "Token expiration time is incorrect")
+		} else {
+			t.Errorf("Could not parse token claims")
+		}
+
 		mockRepo.AssertExpectations(t)
 	})
 
@@ -524,5 +544,127 @@ func TestUserHandler_GetUserByID(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), "Failed to retrieve user")
 		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestUserHandler_GetUserByID_Protected(t *testing.T) {
+	testID := uuid.New() // User being requested
+	authUserID := uuid.New() // User making the request (authenticated)
+	now := time.Now()
+	mockUser := &models.User{
+		ID:           testID,
+		Name:         "Get User",
+		Email:        "get@example.com",
+		PasswordHash: "somehash",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	authMiddleware := middleware.JWTAuthMiddleware(testJWTSecret)
+
+	t.Run("Success with Valid Token", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		userGroup := router.Group("/users")
+		userGroup.Use(authMiddleware)       
+		userGroup.GET("/:id", handler.GetUserByID)
+		idReq := &dto.GetUserByIdRequest{ID: testID}
+		mockRepo.On("GetByID", mock.Anything, idReq).Return(mockUser, nil).Once()
+
+		// Generate a valid token for authUserID
+		validToken, err := generateTestToken(authUserID, testJWTSecret, testJWTExpiration)
+		assert.NoError(t, err)
+
+		// Act
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		request.Header.Set("Authorization", "Bearer "+validToken) // Set Auth header
+		router.ServeHTTP(recorder, request)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var resp dto.UserResponse
+		err = json.Unmarshal(recorder.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, testID, resp.ID)
+		assert.Equal(t, mockUser.Name, resp.Name)
+		assert.Equal(t, mockUser.Email, resp.Email)
+		mockRepo.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Unauthorized - No Token", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		userGroup := router.Group("/users")
+		userGroup.Use(authMiddleware)       
+		userGroup.GET("/:id", handler.GetUserByID)
+		// Act
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		// No Authorization header
+		router.ServeHTTP(recorder, request)
+
+		// Assert
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Authorization header required")
+		mockRepo.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything)
+	})
+
+	t.Run("Unauthorized - Invalid Token Format", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		userGroup := router.Group("/users")
+		userGroup.Use(authMiddleware)       
+		userGroup.GET("/:id", handler.GetUserByID)
+		// Act
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		request.Header.Set("Authorization", "BearerTokenWithoutSpace") // Invalid format
+		router.ServeHTTP(recorder, request)
+
+		// Assert
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid Authorization header format")
+		mockRepo.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything)
+	})
+
+	t.Run("Unauthorized - Invalid Token Signature", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		userGroup := router.Group("/users")
+		userGroup.Use(authMiddleware)       
+		userGroup.GET("/:id", handler.GetUserByID)
+		// Generate token with a DIFFERENT secret
+		invalidToken, err := generateTestToken(authUserID, "wrong-secret", testJWTExpiration)
+		assert.NoError(t, err)
+
+		// Act
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		request.Header.Set("Authorization", "Bearer "+invalidToken)
+		router.ServeHTTP(recorder, request)
+
+		// Assert
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid token") // Generic error from middleware
+		mockRepo.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything)
+	})
+
+	t.Run("Unauthorized - Expired Token", func(t *testing.T) {
+		router, mockRepo, handler := setupTestRouterWithUserMocks()
+		userGroup := router.Group("/users")
+		userGroup.Use(authMiddleware)       
+		userGroup.GET("/:id", handler.GetUserByID)
+		// Generate token with negative expiration
+		expiredToken, err := generateTestToken(authUserID, testJWTSecret, -5*time.Minute)
+		assert.NoError(t, err)
+
+		// Act
+		recorder := httptest.NewRecorder()
+		request, _ := http.NewRequest(http.MethodGet, "/users/"+testID.String(), nil)
+		request.Header.Set("Authorization", "Bearer "+expiredToken)
+		router.ServeHTTP(recorder, request)
+
+		// Assert
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Token has expired")
+		mockRepo.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything)
 	})
 }

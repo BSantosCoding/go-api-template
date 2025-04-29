@@ -4,12 +4,14 @@ import (
 	"errors" // Import errors for checking specific storage errors
 	"log"
 	"net/http"
+	"time"
 
 	"go-api-template/internal/storage" // Use the interface package
 	"go-api-template/internal/transport/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,11 +20,13 @@ import (
 type UserHandler struct {
 	repo storage.UserRepository
 	validator *validator.Validate
+	jwtSecret         string        // Add JWT secret
+	jwtExpiration time.Duration
 }
 
 // NewUserHandler creates a new UserHandler with the given repository
-func NewUserHandler(repo storage.UserRepository, validate *validator.Validate) *UserHandler {
-	return &UserHandler{repo: repo, validator: validate}
+func NewUserHandler(repo storage.UserRepository, validate *validator.Validate, jwtSecret string, jwtExpiration time.Duration) *UserHandler {
+	return &UserHandler{repo: repo, validator: validate, jwtSecret: jwtSecret, jwtExpiration: jwtExpiration}
 }
 
 // GetUsers godoc
@@ -101,7 +105,7 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 // @Produce      json
 // @Param        user body      dto.CreateUserRequest true  "User registration details (ID is ignored/generated)"
 // @Success      201  {object}  dto.UserResponse "User registered successfully"
-// @Failure      400  {object}  map[string]interface{}{error=string, details=map[string]string} "Bad Request - Invalid input or validation failed"
+// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
 // @Failure      409  {object}  map[string]string{error=string} "Conflict - Email already exists"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /auth/register [post] // Changed route example
@@ -150,34 +154,28 @@ func (h *UserHandler) Register(c *gin.Context) {
 // @Produce      json
 // @Param        credentials body      dto.LoginRequest true  "User login credentials"
 // @Success      200  {object}  dto.LoginResponse "Login successful"
-// @Failure      400  {object}  map[string]interface{}{error=string, details=map[string]string} "Bad Request - Invalid input or validation failed"
+// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
 // @Failure      401  {object}  map[string]string{error=string} "Unauthorized - Invalid credentials"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
 // @Router       /auth/login [post] // Changed route example
 func (h *UserHandler) Login(c *gin.Context) {
 	var req dto.LoginRequest
 
-	// Bind JSON body
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
 
-	// Validate the request struct
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
 
-	// Prepare DTO for GetByEmail storage call
 	emailReq := dto.GetUserByEmailRequest{Email: req.Email}
-
-	// Fetch user by email - storage layer MUST return the password hash here
 	user, err := h.repo.GetByEmail(c.Request.Context(), &emailReq)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			// IMPORTANT: Return generic unauthorized error for both not found and bad password
 			log.Printf("Login attempt failed for email %s: user not found", req.Email)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		} else {
@@ -187,24 +185,34 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Compare the provided password with the stored hash
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
 	if err != nil {
-		// Passwords don't match (bcrypt.ErrMismatchedHashAndPassword) or other error
 		log.Printf("Login attempt failed for email %s: invalid password", req.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	// --- Login Successful ---
+	// --- Generate JWT Token ---
+	expirationTime := time.Now().Add(h.jwtExpiration)
+	claims := &jwt.RegisteredClaims{
+		Subject:   user.ID.String(), // Use user ID as subject
+		ExpiresAt: jwt.NewNumericDate(expirationTime),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		//Audience etc. can be added if needed
+	}
 
-	// Map to response DTO
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(h.jwtSecret))
+	if err != nil {
+		log.Printf("Error generating JWT token for user %s: %v", user.Email, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate login token"})
+		return
+	}
+
 	userResponse := MapUserModelToUserResponse(user)
-
-	// Prepare login response (token will be added later)
 	loginResponse := dto.LoginResponse{
-		User: userResponse,
-		// Token: "generate_jwt_here", // Placeholder for JWT generation
+		User:  userResponse,
+		Token: tokenString,
 	}
 
 	log.Printf("User logged in successfully: %s", user.Email)
@@ -220,7 +228,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 // @Param        id   path      string      true  "User ID" Format(uuid)
 // @Param        user body      dto.UpdateUserRequest true  "User object with updated fields" // Use DTO for body param
 // @Success      200  {object}  dto.UserResponse "User updated successfully" // UPDATED response type
-// @Failure      400  {object}  map[string]interface{}{error=string, details=map[string]string} "Bad Request - Invalid input"
+// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
 // @Failure      404  {object}  map[string]string{error=string} "User Not Found"
 // @Failure      409  {object}  map[string]string{error=string} "Conflict - e.g., duplicate email"
 // @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"

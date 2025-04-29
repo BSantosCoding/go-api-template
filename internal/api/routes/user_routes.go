@@ -7,9 +7,10 @@ import (
 )
 
 // registerUserRoutes registers all routes related to users
-func RegisterUserRoutes(rg *gin.RouterGroup, userHandler handlers.UserHandlerInterface) {
+func RegisterUserRoutes(rg *gin.RouterGroup, userHandler handlers.UserHandlerInterface, authMiddleware gin.HandlerFunc) {
 	// Define the sub-group for users (e.g., /api/v1/users)
 	users := rg.Group("/users")
+	users.Use(authMiddleware) // Apply JWT authentication middleware to all user routes
 	{
 		users.GET("/", userHandler.GetUsers)
 		users.GET("/:id", userHandler.GetUserByID)

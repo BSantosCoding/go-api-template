@@ -4,6 +4,7 @@ package routes
 import (
 	// "fmt" // No longer needed here
 	"go-api-template/internal/api/handlers"
+	"go-api-template/internal/api/middleware"
 	"go-api-template/internal/app"
 	"log" // Keep log if you want the startup message
 
@@ -20,12 +21,14 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	apiV1 := router.Group("/api/v1")
 
 	//Create handlers
-	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator)
+	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator, app.Config.JWT.Secret, app.Config.JWT.Expiration)
 	itemHandler := handlers.NewItemHandler(app.ItemRepo, app.Validator)
 
+	// --- Middleware ---
+	authMiddleware := middleware.JWTAuthMiddleware(app.Config.JWT.Secret)
 
 	// --- Register Resource Routes ---
-	RegisterUserRoutes(apiV1, userHandler)
+	RegisterUserRoutes(apiV1, userHandler, authMiddleware)
 	RegisterItemRoutes(apiV1, itemHandler)
 
 	// --- Health Check ---

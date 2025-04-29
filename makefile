@@ -21,7 +21,9 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 	migrate-create migrate-up migrate-down migrate-down-all migrate-force migrate-status \
 	swagger-gen dev test \
 	install-migrate install-swag install-air \
-	check-migrate check-swag check-air check-db-url
+	check-migrate check-swag check-air check-db-url \
+	docker-build docker-build-nocache docker-up docker-down docker-stop docker-logs docker-logs-api docker-logs-db docker-exec-api \
+	docker-migrate-up docker-migrate-down docker-migrate-status docker-migrate-force
 
 # Default target when running 'make'
 .DEFAULT_GOAL := help
@@ -192,6 +194,22 @@ docker-migrate-status: check-db-url ## Check migration status inside the api con
 		-path ./internal/database/migrations \
 		status || true
 
+docker-migrate-force: check-db-url ## Force migration version inside the api container (use with extreme caution!). Usage: make docker-migrate-force VERSION=<version_number>
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION variable is not set."; \
+		echo "Usage: make docker-migrate-force VERSION=<version_number>"; \
+		exit 1; \
+	fi
+	@echo "Forcing migration version to $(VERSION) inside the api container... (Use with caution!)"
+	@# Note: Confirmation prompt is difficult in non-interactive exec, removed for simplicity. Be careful!
+	@INTERNAL_DB_URL="postgres://$(DB_USER):$(DB_PASSWORD)@db:5432/$(DB_NAME)?sslmode=disable"; \
+	echo "Using internal URL for -database flag: $$INTERNAL_DB_URL"; \
+	docker-compose exec api migrate \
+		-database "$$INTERNAL_DB_URL" \
+		-path ./internal/database/migrations \
+		force $(VERSION)
+	@echo "Migration version forced to $(VERSION)."
+
 
 # --- Helper Check Targets ---
 
@@ -233,13 +251,13 @@ help: ## Display this help screen
 	@echo "Usage: make <command>"
 	@echo ""
 	@echo "Available migration commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | grep -v 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' # Show local migrate commands
 	@echo ""
 	@echo "Available development commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen|test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' # Updated grep pattern
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen|test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Available Docker commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' # Updated to include all docker commands
 	@echo ""
 	@echo "Available tool commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'install-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
