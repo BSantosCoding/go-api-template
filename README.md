@@ -2,6 +2,8 @@
 
 A template project for building RESTful APIs in Go using Gin, PostgreSQL (with pgx), Docker, and common development tools.
 
+The goal of this repository is for me to experiment and learn, use new packages, but keep it readable and scalable. A barebones example of how I want to build my APIs.
+
 ## Features
 
 - **Framework:** Gin Web Framework

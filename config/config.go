@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings" // Import strings package
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -14,7 +15,8 @@ import (
 type Config struct {
 	Server ServerConfig `mapstructure:"server"`
 	DB     DBConfig     `mapstructure:"database"`
-	CORS   CORSConfig   `mapstructure:"cors"` // Add CORS config section
+	CORS   CORSConfig   `mapstructure:"cors"`
+	JWT    JWTConfig    `mapstructure:"jwt"`
 }
 
 // ServerConfig holds server specific configuration
@@ -37,6 +39,13 @@ type CORSConfig struct {
 	AllowedOrigins []string `mapstructure:"allowed_origins"` // Slice of allowed origin strings
 }
 
+// JWTConfig holds JWT specific configuration
+type JWTConfig struct {
+	Secret           string        `mapstructure:"secret"`
+	ExpirationMinutes int           `mapstructure:"expiration_minutes"` // Store as int from config/env
+	Expiration       time.Duration `mapstructure:"-"`                  // Calculated duration, ignore during unmarshal
+}
+
 // Load configuration from file and environment variables
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
@@ -54,6 +63,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
 	viper.SetDefault("database.name", "api_db")
+	viper.SetDefault("jwt.secret", "default-insecure-secret-key-change-me!") // !! CHANGE THIS VIA ENV !!
+	viper.SetDefault("jwt.expiration_minutes", 60)
+
 	// Default CORS: Allow common local dev origins and maybe wildcard for simple setup
 	// For production, this SHOULD be overridden by environment variables.
 	viper.SetDefault("cors.allowed_origins", []string{"http://localhost:3000", "http://127.0.0.1:3000"})
@@ -72,7 +84,8 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 	// Allow environment variable CORS_ALLOWED_ORIGINS to override (comma-separated string)
 	viper.BindEnv("cors.allowed_origins", "CORS_ALLOWED_ORIGINS")
-
+	viper.BindEnv("jwt.secret", "API_JWT_SECRET")
+	viper.BindEnv("jwt.expiration_minutes", "API_JWT_EXPIRATION_MINUTES")
 
 	// --- Unmarshal Config ---
 	var cfg Config
@@ -116,6 +129,27 @@ func Load() (*Config, error) {
 		for i, origin := range cfg.CORS.AllowedOrigins {
 			cfg.CORS.AllowedOrigins[i] = strings.TrimSpace(origin)
 		}
+	}
+
+	// JWT Overrides (using non-prefixed env vars like DB/Server for consistency)
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+		cfg.JWT.Secret = secret
+	}
+	if expStr := os.Getenv("JWT_EXPIRATION_MINUTES"); expStr != "" {
+		if exp, err := strconv.Atoi(expStr); err == nil {
+			cfg.JWT.ExpirationMinutes = exp
+		}
+	}
+
+	// --- Calculate derived values ---
+	cfg.JWT.Expiration = time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute
+
+	// --- Final Validation ---
+	if cfg.JWT.Secret == "default-insecure-secret-key-change-me!" {
+		log.Println("WARNING: Using default insecure JWT secret. Set JWT_SECRET environment variable.")
+	}
+	if cfg.JWT.Secret == "" {
+		log.Fatal("FATAL: JWT_SECRET cannot be empty.") // Or return an error
 	}
 
 	log.Printf("Configuration loaded: Server Port=%d, DB Host=%s, Allowed Origins=%v",

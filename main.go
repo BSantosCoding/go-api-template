@@ -32,6 +32,10 @@ import (
 // @BasePath  /api/v1
 // @schemes   http https      // Schemes your API supports
 
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -45,7 +49,8 @@ func main() {
 	defer dbPool.Close()
 
 	userRepo := postgres.NewUserRepo(dbPool)
-	itemRepo := postgres.NewItemRepo(dbPool)
+	jobRepo := postgres.NewJobRepo(dbPool)
+	invoiceRepo := postgres.NewInvoiceRepo(dbPool)
 
 	validate := validator.New()
 
@@ -53,7 +58,8 @@ func main() {
 		Config:   cfg,
 		DBPool:   dbPool,
 		UserRepo: userRepo,
-		ItemRepo: itemRepo,
+		JobRepo: jobRepo,
+		InvoiceRepo: invoiceRepo,
 		Validator: validate,
 	}
 

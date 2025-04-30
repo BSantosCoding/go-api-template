@@ -1,0 +1,736 @@
+// /home/bsant/testing/go-api-template/internal/api/handlers/jobs.go
+package handlers
+
+import (
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+
+	"go-api-template/internal/api/middleware" // Import middleware for GetUserIDFromContext
+	"go-api-template/internal/models"         // Import models for mapping
+	"go-api-template/internal/storage"
+	"go-api-template/internal/transport/dto" // Import DTOs
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator"
+	"github.com/google/uuid"
+)
+
+// JobHandler holds dependencies for job operations.
+type JobHandler struct {
+	repo      storage.JobRepository
+	validator *validator.Validate
+	// Add userRepo if needed for fetching user details for response enrichment
+}
+
+// NewJobHandler creates a new JobHandler.
+func NewJobHandler(repo storage.JobRepository, validate *validator.Validate) *JobHandler {
+	return &JobHandler{
+		repo:      repo,
+		validator: validate,
+	}
+}
+
+// CreateJob godoc
+// @Summary      Create a new job posting
+// @Description  Adds a new job available for contractors. Employer ID is taken from auth context.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        job body      dto.CreateJobRequest true  "Job details (EmployerID ignored)"
+// @Success      201 {object}  dto.JobResponse "Job created successfully"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid input"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs [post]
+// @Security     BearerAuth
+func (h *JobHandler) CreateJob(c *gin.Context) {
+	// Get EmployerID from auth context
+	employerID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}) // Or Internal Server Error if context missing is unexpected
+		return
+	}
+
+	var req dto.CreateJobRequest
+	// Bind/Validate dto.CreateJobRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+
+	// Set EmployerID from context
+	req.EmployerID = employerID
+
+	// Call h.repo.Create
+	createdJob, err := h.repo.Create(c.Request.Context(), &req)
+	if err != nil {
+		// Handle potential repo errors (e.g., conflict, db error)
+		log.Printf("Error creating job in repository: %v", err)
+		// Check for specific errors if repo returns them (e.g., storage.ErrConflict)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
+		return
+	}
+
+	// Map result to dto.JobResponse
+	jobResponse := MapJobModelToJobResponse(createdJob)
+
+	// Return JSON response
+	c.JSON(http.StatusCreated, jobResponse)
+}
+
+// GetJobByID godoc
+// @Summary      Get a job by ID
+// @Description  Retrieves details for a specific job by its ID.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Success      200 {object}  dto.JobResponse "Successfully retrieved job"
+// @Failure      400 {object}  map[string]string "Invalid ID format"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id} [get]
+// @Security     BearerAuth
+func (h *JobHandler) GetJobByID(c *gin.Context) {
+	// Parse ID from path
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	// Create dto.GetJobByIDRequest
+	req := dto.GetJobByIDRequest{ID: jobID}
+
+	// Call h.repo.GetByID
+	job, err := h.repo.GetByID(c.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("Error fetching job by ID %s: %v", idStr, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
+		}
+		return
+	}
+
+	// Map result to dto.JobResponse
+	jobResponse := MapJobModelToJobResponse(job)
+
+	// Return JSON response
+	c.JSON(http.StatusOK, jobResponse)
+}
+
+// ListAvailableJobs godoc
+// @Summary      List available jobs
+// @Description  Retrieves a list of jobs that are 'Waiting' and have no contractor assigned. Supports filtering and pagination.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        limit query int false "Pagination limit" default(10)
+// @Param        offset query int false "Pagination offset" default(0)
+// @Param        min_rate query number false "Minimum rate filter"
+// @Param        max_rate query number false "Maximum rate filter"
+// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of available jobs"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/available [get]
+// @Security     BearerAuth
+func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
+	var req dto.ListAvailableJobsRequest
+
+	// Bind/Validate query params into dto.ListAvailableJobsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
+		return
+	}
+
+	// Explicitly validate the struct if needed 
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+	// Set defaults if binding didn't 
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	// Call h.repo.ListAvailable
+	jobs, err := h.repo.ListAvailable(c.Request.Context(), &req)
+	if err != nil {
+		log.Printf("Error listing available jobs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve available jobs"})
+		return
+	}
+
+	// Map results to []dto.JobResponse
+	jobResponses := make([]dto.JobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+	}
+
+	// Return JSON response
+	c.JSON(http.StatusOK, jobResponses)
+}
+
+// ListEmployerJobs godoc
+// @Summary      List jobs posted by the authenticated employer
+// @Description  Retrieves a list of jobs posted by the currently authenticated user (employer). Supports filtering and pagination.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        limit query int false "Pagination limit" default(10)
+// @Param        offset query int false "Pagination offset" default(0)
+// @Param        state query string false "Filter by state (Waiting, Ongoing, Complete, Archived)" Enums(Waiting, Ongoing, Complete, Archived)
+// @Param        min_rate query number false "Minimum rate filter"
+// @Param        max_rate query number false "Maximum rate filter"
+// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of employer's jobs"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/my/employer [get] // Example route
+// @Security     BearerAuth
+func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
+	// Get EmployerID from auth context
+	employerID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req dto.ListJobsByEmployerRequest
+	// Bind/Validate query params
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+	if req.Limit <= 0 { req.Limit = 10 }
+	if req.Offset < 0 { req.Offset = 0 }
+
+	// Set EmployerID on DTO
+	req.EmployerID = employerID
+
+	// Call h.repo.ListByEmployer
+	jobs, err := h.repo.ListByEmployer(c.Request.Context(), &req)
+	if err != nil {
+		log.Printf("Error listing employer jobs for user %s: %v", employerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve employer jobs"})
+		return
+	}
+
+	// Map results to []dto.JobResponse
+	jobResponses := make([]dto.JobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+	}
+
+	// Return JSON response
+	c.JSON(http.StatusOK, jobResponses)
+}
+
+// ListContractorJobs godoc
+// @Summary      List jobs taken by the authenticated contractor
+// @Description  Retrieves a list of jobs assigned to the currently authenticated user (contractor). Supports filtering and pagination.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        limit query int false "Pagination limit" default(10)
+// @Param        offset query int false "Pagination offset" default(0)
+// @Param        state query string false "Filter by state (Ongoing, Complete, Archived)" Enums(Ongoing, Complete, Archived)
+// @Param        min_rate query number false "Minimum rate filter"
+// @Param        max_rate query number false "Maximum rate filter"
+// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of contractor's jobs"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/my/contractor [get] // Example route
+// @Security     BearerAuth
+func (h *JobHandler) ListContractorJobs(c *gin.Context) {
+	// Get ContractorID from auth context
+	contractorID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req dto.ListJobsByContractorRequest
+	// Bind/Validate query params
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+	if req.Limit <= 0 { req.Limit = 10 }
+	if req.Offset < 0 { req.Offset = 0 }
+
+	// Set ContractorID on DTO
+	req.ContractorID = contractorID
+
+	// Call h.repo.ListByContractor
+	jobs, err := h.repo.ListByContractor(c.Request.Context(), &req)
+	if err != nil {
+		log.Printf("Error listing contractor jobs for user %s: %v", contractorID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve contractor jobs"})
+		return
+	}
+
+	// Map results to []dto.JobResponse
+	jobResponses := make([]dto.JobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+	}
+
+	// Return JSON response
+	c.JSON(http.StatusOK, jobResponses)
+}
+
+// UpdateJobDetails godoc
+// @Summary      Update job rate or duration
+// @Description  Allows the employer to update the rate or duration ONLY if the job is in 'Waiting' state and has no contractor assigned.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Param        details body dto.UpdateJobDetailsRequest true "Rate and/or Duration to update"
+// @Success      200 {object}  dto.JobResponse "Job details updated successfully"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid input"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      403 {object}  map[string]string "Forbidden - User cannot update details or job state prevents it"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id}/details [patch]
+// @Security     BearerAuth
+func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
+	userID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("UpdateJobDetails: Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	var req dto.UpdateJobDetailsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+
+	if req.Rate == nil && req.Duration == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No update fields (rate, duration) provided"})
+		return
+	}
+
+	getReq := dto.GetJobByIDRequest{ID: jobID}
+	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("UpdateJobDetails: Error fetching job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
+		}
+		return
+	}
+
+	// Authorization check
+	if !(userID == existingJob.EmployerID && existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
+		log.Printf("UpdateJobDetails: Forbidden attempt on job %s by user %s. State: %s, Contractor: %v", jobID, userID, existingJob.State, existingJob.ContractorID)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot update job details in current state or by this user"})
+		return
+	}
+
+	updateRepoReq := dto.UpdateJobRequest{
+		ID:       jobID,
+		Rate:     req.Rate,
+		Duration: req.Duration,
+	}
+
+	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
+	if err != nil {
+		// Assuming repo.Update might return ErrNotFound if ID is somehow invalid despite prior check
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else {
+			log.Printf("UpdateJobDetails: Error updating job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job details"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, MapJobModelToJobResponse(updatedJob))
+}
+
+
+// AssignContractor godoc
+// @Summary      Assign a contractor to a job
+// @Description  Allows the employer or the contractor themselves to assign a contractor to a job, ONLY if the job is in 'Waiting' state and has no contractor. Employer cannot assign self.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Param        assignment body dto.AssignContractorRequest true "Contractor ID to assign"
+// @Success      200 {object}  dto.JobResponse "Contractor assigned successfully"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid input or employer assigning self"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      403 {object}  map[string]string "Forbidden - Cannot assign contractor in current state or invalid user"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id}/contractor [put] // Use PUT for assignment
+// @Security     BearerAuth
+func (h *JobHandler) AssignContractor(c *gin.Context) {
+	userID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("AssignContractor: Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	var req dto.AssignContractorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+
+	getReq := dto.GetJobByIDRequest{ID: jobID}
+	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("AssignContractor: Error fetching job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
+		}
+		return
+	}
+
+	// Authorization: Job state and contractor status
+	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
+		log.Printf("AssignContractor: Forbidden attempt on job %s in state %s with contractor %v", jobID, existingJob.State, existingJob.ContractorID)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot assign contractor to job in its current state"})
+		return
+	}
+
+	// Authorization: Role check
+	isEmployer := existingJob.EmployerID == userID
+	isAssigningSelf := req.ContractorID == userID
+	if isEmployer {
+		if isAssigningSelf {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Employer cannot assign themselves as contractor"})
+			return
+		}
+	} else {
+		if !isAssigningSelf {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: You can only assign yourself to this job"})
+			return
+		}
+	}
+
+	contractorID := req.ContractorID
+	updateRepoReq := dto.UpdateJobRequest{
+		ID:           jobID,
+		ContractorID: &contractorID,
+	}
+
+	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrConflict) { // e.g., invalid contractor ID FK
+			c.JSON(http.StatusConflict, gin.H{"error": "Assignment failed: Invalid contractor ID"})
+		} else if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else {
+			log.Printf("AssignContractor: Error assigning contractor to job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to assign contractor"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, MapJobModelToJobResponse(updatedJob))
+}
+
+
+// UnassignContractor godoc
+// @Summary      Unassign the contractor from a job
+// @Description  Allows the currently assigned contractor to remove themselves from the job, ONLY if the job is in 'Waiting' state. State might revert to 'Waiting'.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Success      200 {object}  dto.JobResponse "Contractor unassigned successfully"
+// @Failure      400 {object}  map[string]string "Invalid ID format"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      403 {object}  map[string]string "Forbidden - User is not the contractor or job state prevents unassignment"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id}/contractor [delete] // Use DELETE for unassignment
+// @Security     BearerAuth
+func (h *JobHandler) UnassignContractor(c *gin.Context) {
+	userID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("UnassignContractor: Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	getReq := dto.GetJobByIDRequest{ID: jobID}
+	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("UnassignContractor: Error fetching job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
+		}
+		return
+	}
+
+	// Authorization check
+	if !(existingJob.ContractorID != nil && *existingJob.ContractorID == userID && existingJob.State == models.JobStateOngoing) {
+		log.Printf("UnassignContractor: Forbidden attempt on job %s by user %s. State: %s, Current Contractor: %v", jobID, userID, existingJob.State, existingJob.ContractorID)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot unassign contractor in current state or by this user"})
+		return
+	}
+
+	var nilUUID *uuid.UUID
+	waitingState := models.JobStateWaiting
+	updateRepoReq := dto.UpdateJobRequest{
+		ID:           jobID,
+		ContractorID: nilUUID,
+		State:        &waitingState,
+	}
+
+	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else {
+			log.Printf("UnassignContractor: Error unassigning contractor from job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unassign contractor"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, MapJobModelToJobResponse(updatedJob))
+}
+
+
+// UpdateJobState godoc
+// @Summary      Update job state
+// @Description  Allows the employer or the assigned contractor to update the job state according to valid transitions (Waiting -> Ongoing -> Complete -> Archived).
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Param        state body dto.UpdateJobStateRequest true "New state for the job"
+// @Success      200 {object}  dto.JobResponse "Job state updated successfully"
+// @Failure      400 {object}  map[string]string "Bad Request - Invalid input or invalid state transition"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      403 {object}  map[string]string "Forbidden - User cannot update state for this job"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id}/state [patch]
+// @Security     BearerAuth
+func (h *JobHandler) UpdateJobState(c *gin.Context) {
+	userID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("UpdateJobState: Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	var req dto.UpdateJobStateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
+		return
+	}
+
+	getReq := dto.GetJobByIDRequest{ID: jobID}
+	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("UpdateJobState: Error fetching job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
+		}
+		return
+	}
+
+	// Authorization check
+	isEmployer := existingJob.EmployerID == userID
+	isCurrentContractor := existingJob.ContractorID != nil && *existingJob.ContractorID == userID
+	if !(isEmployer || isCurrentContractor) {
+		log.Printf("UpdateJobState: Forbidden attempt on job %s by user %s. Role: Employer=%t, Contractor=%t", jobID, userID, isEmployer, isCurrentContractor)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only employer or assigned contractor can update job state"})
+		return
+	}
+
+	// Validation: Check state transition
+	if !isValidJobStateTransition(existingJob.State, req.State) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid state transition from %s to %s", existingJob.State, req.State)})
+		return
+	}
+
+	newState := req.State
+	updateRepoReq := dto.UpdateJobRequest{
+		ID:    jobID,
+		State: &newState,
+	}
+
+	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else {
+			log.Printf("UpdateJobState: Error updating job state %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job state"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, MapJobModelToJobResponse(updatedJob))
+}
+
+// DeleteJob
+// @Summary      Delete a job
+// @Description  Deletes a job posting. Allowed only by the employer if the job is in 'Waiting' state and has no contractor.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id path      string true  "Job ID" Format(uuid)
+// @Success      204 {object}  nil "Job deleted successfully"
+// @Failure      400 {object}  map[string]string "Invalid ID format"
+// @Failure      401 {object}  map[string]string "Unauthorized"
+// @Failure      403 {object}  map[string]string "Forbidden - User cannot delete this job or job state prevents deletion"
+// @Failure      404 {object}  map[string]string "Job Not Found"
+// @Failure      500 {object}  map[string]string "Internal Server Error"
+// @Router       /jobs/{id} [delete]
+// @Security     BearerAuth
+func (h *JobHandler) DeleteJob(c *gin.Context) {
+	// Get UserID from auth context
+	userID, err := middleware.GetUserIDFromContext(c)
+	if err != nil {
+		log.Printf("Error getting user ID from context: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Parse JobID from path
+	idStr := c.Param("id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
+		return
+	}
+
+	// Fetch existing job using h.repo.GetByID for authorization check
+	getReq := dto.GetJobByIDRequest{ID: jobID}
+	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("Error fetching job %s for delete check: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job for deletion"})
+		}
+		return
+	}
+
+	// --- Authorization Check ---
+	// Rule: Only the employer can delete.
+	if existingJob.EmployerID != userID {
+		log.Printf("Forbidden attempt to delete job %s by non-employer user %s", jobID, userID)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the employer can delete this job"})
+		return
+	}
+	// Rule: Only if state is 'Waiting' and no contractor assigned.
+	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Job cannot be deleted in its current state or with an assigned contractor"})
+		return
+	}
+
+	// Create dto.DeleteJobRequest
+	req := dto.DeleteJobRequest{ID: jobID}
+
+	// Call h.repo.Delete
+	err = h.repo.Delete(c.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) { // Should have been caught above
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else {
+			log.Printf("Error deleting job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete job"})
+		}
+		return
+	}
+
+	// Return 204 No Content
+	c.Status(http.StatusNoContent)
+}

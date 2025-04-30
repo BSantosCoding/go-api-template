@@ -6,6 +6,7 @@ database:
   host: 'localhost' # Will be overridden by env var DB_HOST="db" in compose
   port: 5432
   user: 'postgres' # Will be overridden by env var DB_USER in compose
-  password: 'postgres' # Will be overridden by env var DB_PASSWORD in compose
   name: 'api_db' # Will be overridden by env var DB_NAME in compose
 
+jwt:
+  expiration_minutes: 60 # Default token expiration in minutes (can be overridden by env var)

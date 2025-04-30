@@ -14,7 +14,8 @@ type Application struct {
 	Config   *config.Config
 	DBPool   *pgxpool.Pool
 	UserRepo storage.UserRepository
-	ItemRepo storage.ItemRepository
+	JobRepo storage.JobRepository
+	InvoiceRepo storage.InvoiceRepository
 	Validator *validator.Validate
 	// Add other repositories 
 	// Add services maybe (how to decide on this?)
