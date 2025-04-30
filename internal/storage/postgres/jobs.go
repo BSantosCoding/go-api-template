@@ -120,27 +120,6 @@ func (r *JobRepo) GetByID(ctx context.Context, req *dto.GetJobByIDRequest) (*mod
 	return &job, nil
 }
 
-// buildJobListQuery constructs the SQL query for listing jobs based on filters.
-func (r *JobRepo) buildJobListQuery(baseQuery string, conditions []string, args *[]interface{}, reqOffset, reqLimit int) string {
-	var queryBuilder strings.Builder
-	queryBuilder.WriteString(baseQuery)
-
-	if len(conditions) > 0 {
-		queryBuilder.WriteString(" WHERE ")
-		queryBuilder.WriteString(strings.Join(conditions, " AND "))
-	}
-
-	queryBuilder.WriteString(" ORDER BY created_at DESC") // Default ordering
-
-	// Add LIMIT and OFFSET
-	*args = append(*args, reqLimit)
-	queryBuilder.WriteString(fmt.Sprintf(" LIMIT $%d", len(*args)))
-	*args = append(*args, reqOffset)
-	queryBuilder.WriteString(fmt.Sprintf(" OFFSET $%d", len(*args)))
-
-	return queryBuilder.String()
-}
-
 // ListAvailable retrieves jobs that have no contractor assigned yet.
 func (r *JobRepo) ListAvailable(ctx context.Context, req *dto.ListAvailableJobsRequest) ([]models.Job, error) {
 	baseQuery := `
@@ -311,7 +290,7 @@ func (r *JobRepo) Update(ctx context.Context, req *dto.UpdateJobRequest) (*model
 	}
 
 	// Add updated_at and WHERE clause
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = NOW()"))
+	setClauses = append(setClauses, "updated_at = NOW()")
 	args = append(args, req.ID) // Add ID for WHERE clause
 
 	query := fmt.Sprintf(`
