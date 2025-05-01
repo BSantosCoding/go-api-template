@@ -67,22 +67,36 @@ type UpdateJobRequest struct {
 type UpdateJobDetailsRequest struct {
 	Rate     *float64 `json:"rate,omitempty" validate:"omitempty,gt=0"`
 	Duration *int     `json:"duration,omitempty" validate:"omitempty,gt=0"`
+	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
+	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 
 // AssignContractorRequest defines the structure for assigning a contractor.
 type AssignContractorRequest struct {
 	ContractorID uuid.UUID `json:"contractor_id" validate:"required,uuid"`
+	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
+	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 
 // UpdateJobStateRequest defines the structure for updating the job state.
 type UpdateJobStateRequest struct {
 	State models.JobState `json:"state" validate:"required,oneof=Waiting Ongoing Complete Archived"`
+	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
+	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 
 // DeleteJobRequest defines the structure for deleting a job.
 type DeleteJobRequest struct {
 	ID uuid.UUID `json:"-" validate:"required,uuid"`
+	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
+
+// UnassignContractorRequest defines the structure for unassigning a contractor.
+type UnassignContractorRequest struct {
+	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
+	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
+}
+
 
 // JobResponse defines the standard job data returned to the client.
 type JobResponse struct {

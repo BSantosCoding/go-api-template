@@ -3,13 +3,12 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 
 	"go-api-template/internal/api/middleware" // Import middleware for GetUserIDFromContext
-	"go-api-template/internal/models"         // Import models for mapping
-	"go-api-template/internal/storage"
+	// Import models for mapping
+	"go-api-template/internal/services"
 	"go-api-template/internal/transport/dto" // Import DTOs
 
 	"github.com/gin-gonic/gin"
@@ -19,15 +18,14 @@ import (
 
 // JobHandler holds dependencies for job operations.
 type JobHandler struct {
-	repo      storage.JobRepository
+	service services.JobService 
 	validator *validator.Validate
-	// Add userRepo if needed for fetching user details for response enrichment
 }
 
 // NewJobHandler creates a new JobHandler.
-func NewJobHandler(repo storage.JobRepository, validate *validator.Validate) *JobHandler {
+func NewJobHandler(service services.JobService, validate *validator.Validate) *JobHandler {
 	return &JobHandler{
-		repo:      repo,
+		service: service,
 		validator: validate,
 	}
 }
@@ -70,11 +68,11 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 	req.EmployerID = employerID
 
 	// Call h.repo.Create
-	createdJob, err := h.repo.Create(c.Request.Context(), &req)
+	createdJob, err := h.service.CreateJob(c.Request.Context(), &req)
 	if err != nil {
 		// Handle potential repo errors (e.g., conflict, db error)
 		log.Printf("Error creating job in repository: %v", err)
-		// Check for specific errors if repo returns them (e.g., storage.ErrConflict)
+		// Check for specific errors if repo returns them (e.g., services.ErrConflict)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
 		return
 	}
@@ -113,9 +111,9 @@ func (h *JobHandler) GetJobByID(c *gin.Context) {
 	req := dto.GetJobByIDRequest{ID: jobID}
 
 	// Call h.repo.GetByID
-	job, err := h.repo.GetByID(c.Request.Context(), &req)
+	job, err := h.service.GetJobByID(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
 		} else {
 			log.Printf("Error fetching job by ID %s: %v", idStr, err)
@@ -171,7 +169,7 @@ func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
 	}
 
 	// Call h.repo.ListAvailable
-	jobs, err := h.repo.ListAvailable(c.Request.Context(), &req)
+	jobs, err := h.service.ListAvailableJobs(c.Request.Context(), &req)
 	if err != nil {
 		log.Printf("Error listing available jobs: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve available jobs"})
@@ -232,7 +230,7 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 	req.EmployerID = employerID
 
 	// Call h.repo.ListByEmployer
-	jobs, err := h.repo.ListByEmployer(c.Request.Context(), &req)
+	jobs, err := h.service.ListJobsByEmployer(c.Request.Context(), &req)
 	if err != nil {
 		log.Printf("Error listing employer jobs for user %s: %v", employerID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve employer jobs"})
@@ -293,7 +291,7 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 	req.ContractorID = contractorID
 
 	// Call h.repo.ListByContractor
-	jobs, err := h.repo.ListByContractor(c.Request.Context(), &req)
+	jobs, err := h.service.ListJobsByContractor(c.Request.Context(), &req)
 	if err != nil {
 		log.Printf("Error listing contractor jobs for user %s: %v", contractorID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve contractor jobs"})
@@ -351,42 +349,19 @@ func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-
 	if req.Rate == nil && req.Duration == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No update fields (rate, duration) provided"})
 		return
 	}
+	req.UserID = userID
+	req.JobID = jobID
 
-	getReq := dto.GetJobByIDRequest{ID: jobID}
-	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	updatedJob, err := h.service.UpdateJobDetails(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("UpdateJobDetails: Error fetching job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
-		}
-		return
-	}
-
-	// Authorization check
-	if !(userID == existingJob.EmployerID && existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
-		log.Printf("UpdateJobDetails: Forbidden attempt on job %s by user %s. State: %s, Contractor: %v", jobID, userID, existingJob.State, existingJob.ContractorID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot update job details in current state or by this user"})
-		return
-	}
-
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:       jobID,
-		Rate:     req.Rate,
-		Duration: req.Duration,
-	}
-
-	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
-	if err != nil {
-		// Assuming repo.Update might return ErrNotFound if ID is somehow invalid despite prior check
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot update job in its current state"})
 		} else {
 			log.Printf("UpdateJobDetails: Error updating job %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job details"})
@@ -440,52 +415,17 @@ func (h *JobHandler) AssignContractor(c *gin.Context) {
 		return
 	}
 
-	getReq := dto.GetJobByIDRequest{ID: jobID}
-	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	req.JobID = jobID
+	req.UserID = userID
+
+	updatedJob, err := h.service.AssignContractor(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("AssignContractor: Error fetching job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
-		}
-		return
-	}
-
-	// Authorization: Job state and contractor status
-	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
-		log.Printf("AssignContractor: Forbidden attempt on job %s in state %s with contractor %v", jobID, existingJob.State, existingJob.ContractorID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot assign contractor to job in its current state"})
-		return
-	}
-
-	// Authorization: Role check
-	isEmployer := existingJob.EmployerID == userID
-	isAssigningSelf := req.ContractorID == userID
-	if isEmployer {
-		if isAssigningSelf {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Employer cannot assign themselves as contractor"})
-			return
-		}
-	} else {
-		if !isAssigningSelf {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: You can only assign yourself to this job"})
-			return
-		}
-	}
-
-	contractorID := req.ContractorID
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:           jobID,
-		ContractorID: &contractorID,
-	}
-
-	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrConflict) { // e.g., invalid contractor ID FK
+		if errors.Is(err, services.ErrConflict) { // e.g., invalid contractor ID FK
 			c.JSON(http.StatusConflict, gin.H{"error": "Assignment failed: Invalid contractor ID"})
-		} else if errors.Is(err, storage.ErrNotFound) {
+		} else if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot assign contractor in current state"})
 		} else {
 			log.Printf("AssignContractor: Error assigning contractor to job %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to assign contractor"})
@@ -527,37 +467,17 @@ func (h *JobHandler) UnassignContractor(c *gin.Context) {
 		return
 	}
 
-	getReq := dto.GetJobByIDRequest{ID: jobID}
-	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	req := dto.UnassignContractorRequest{
+		JobID: jobID,
+		UserID: userID,
+	}
+
+	updatedJob, err := h.service.UnassignContractor(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("UnassignContractor: Error fetching job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
-		}
-		return
-	}
-
-	// Authorization check
-	if !(existingJob.ContractorID != nil && *existingJob.ContractorID == userID && existingJob.State == models.JobStateOngoing) {
-		log.Printf("UnassignContractor: Forbidden attempt on job %s by user %s. State: %s, Current Contractor: %v", jobID, userID, existingJob.State, existingJob.ContractorID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot unassign contractor in current state or by this user"})
-		return
-	}
-
-	var nilUUID *uuid.UUID
-	waitingState := models.JobStateWaiting
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:           jobID,
-		ContractorID: nilUUID,
-		State:        &waitingState,
-	}
-
-	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot unassign contractor in current state"})
 		} else {
 			log.Printf("UnassignContractor: Error unassigning contractor from job %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unassign contractor"})
@@ -611,43 +531,15 @@ func (h *JobHandler) UpdateJobState(c *gin.Context) {
 		return
 	}
 
-	getReq := dto.GetJobByIDRequest{ID: jobID}
-	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
+	req.JobID = jobID
+	req.UserID = userID
+
+	updatedJob, err := h.service.UpdateJobState(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("UpdateJobState: Error fetching job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job"})
-		}
-		return
-	}
-
-	// Authorization check
-	isEmployer := existingJob.EmployerID == userID
-	isCurrentContractor := existingJob.ContractorID != nil && *existingJob.ContractorID == userID
-	if !(isEmployer || isCurrentContractor) {
-		log.Printf("UpdateJobState: Forbidden attempt on job %s by user %s. Role: Employer=%t, Contractor=%t", jobID, userID, isEmployer, isCurrentContractor)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only employer or assigned contractor can update job state"})
-		return
-	}
-
-	// Validation: Check state transition
-	if !isValidJobStateTransition(existingJob.State, req.State) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid state transition from %s to %s", existingJob.State, req.State)})
-		return
-	}
-
-	newState := req.State
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:    jobID,
-		State: &newState,
-	}
-
-	updatedJob, err := h.repo.Update(c.Request.Context(), &updateRepoReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot update job state in current state"})
 		} else {
 			log.Printf("UpdateJobState: Error updating job state %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job state"})
@@ -690,40 +582,18 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 		return
 	}
 
-	// Fetch existing job using h.repo.GetByID for authorization check
-	getReq := dto.GetJobByIDRequest{ID: jobID}
-	existingJob, err := h.repo.GetByID(c.Request.Context(), &getReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("Error fetching job %s for delete check: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job for deletion"})
-		}
-		return
-	}
-
-	// --- Authorization Check ---
-	// Rule: Only the employer can delete.
-	if existingJob.EmployerID != userID {
-		log.Printf("Forbidden attempt to delete job %s by non-employer user %s", jobID, userID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the employer can delete this job"})
-		return
-	}
-	// Rule: Only if state is 'Waiting' and no contractor assigned.
-	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Job cannot be deleted in its current state or with an assigned contractor"})
-		return
-	}
-
 	// Create dto.DeleteJobRequest
-	req := dto.DeleteJobRequest{ID: jobID}
+	req := dto.DeleteJobRequest{ID: jobID, UserID: userID}
 
 	// Call h.repo.Delete
-	err = h.repo.Delete(c.Request.Context(), &req)
+	err = h.service.DeleteJob(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) { // Should have been caught above
+		if errors.Is(err, services.ErrNotFound) { 
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot delete job in current state"})
+		} else if errors.Is(err, services.ErrInvalidState) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Job is not in a deletable state"})
 		} else {
 			log.Printf("Error deleting job %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete job"})

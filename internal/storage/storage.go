@@ -6,6 +6,8 @@ import (
 	"go-api-template/internal/transport/dto"
 )
 
+//go:generate mockgen -source=storage.go -destination=../mocks/mock_repositorys.go -package=mocks
+
 // UserRepository defines the interface for user data operations.
 type UserRepository interface {
 	GetAll(ctx context.Context) ([]models.User, error)
