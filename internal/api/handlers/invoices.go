@@ -2,10 +2,8 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"go-api-template/internal/api/middleware"
-	"go-api-template/internal/models"
-	"go-api-template/internal/storage"
+	"go-api-template/internal/services"
 	"go-api-template/internal/transport/dto"
 	"log"
 	"net/http"
@@ -17,16 +15,14 @@ import (
 
 // InvoiceHandler holds dependencies for invoice operations.
 type InvoiceHandler struct {
-	invoiceRepo storage.InvoiceRepository
-	jobRepo     storage.JobRepository // Needed for Create logic and Auth checks
+	service services.InvoiceService
 	validator   *validator.Validate
 }
 
 // NewInvoiceHandler creates a new InvoiceHandler.
-func NewInvoiceHandler(invoiceRepo storage.InvoiceRepository, jobRepo storage.JobRepository, validate *validator.Validate) *InvoiceHandler {
+func NewInvoiceHandler(service services.InvoiceService, validate *validator.Validate) *InvoiceHandler {
 	return &InvoiceHandler{
-		invoiceRepo: invoiceRepo,
-		jobRepo:     jobRepo,
+		service: service,
 		validator:   validate,
 	}
 }
@@ -47,7 +43,6 @@ func NewInvoiceHandler(invoiceRepo storage.InvoiceRepository, jobRepo storage.Jo
 // @Router       /invoices [post]
 // @Security     BearerAuth
 func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
-	// 1. Get UserID (ContractorID)
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
 		log.Printf("CreateInvoice: Error getting user ID from context: %v", err)
@@ -55,7 +50,6 @@ func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
 		return
 	}
 
-	// 2. Bind/Validate Request
 	var req dto.CreateInvoiceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
@@ -67,94 +61,20 @@ func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
 		return
 	}
 
-	// 3. Fetch Job
-	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
-	job, err := h.jobRepo.GetByID(c.Request.Context(), &jobReq)
+	req.UserId = userID
+
+	createdInvoice, err := h.service.CreateInvoice(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("CreateInvoice: Error fetching job %s: %v", req.JobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job details"})
-		}
-		return
-	}
-
-	// 4. Authorization Check
-	if job.ContractorID == nil || *job.ContractorID != userID {
-		log.Printf("CreateInvoice: Forbidden attempt by user %s (not contractor %v) for job %s", userID, job.ContractorID, req.JobID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can create invoices for this job"})
-		return
-	}
-	if job.State != models.JobStateOngoing {
-		log.Printf("CreateInvoice: Forbidden attempt for job %s in state %s", req.JobID, job.State)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Invoices can only be created for 'Ongoing' jobs"})
-		return
-	}
-
-	// 5. Determine next interval number
-	intervalReq := &dto.GetMaxIntervalForJobRequest{JobID: req.JobID}
-	maxIntervalNum, err := h.invoiceRepo.GetMaxIntervalForJob(c.Request.Context(), intervalReq)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to determine next invoice interval"})
-		return
-	}
-	nextIntervalNumber := maxIntervalNum + 1
-
-	// 6. Check interval validity and calculate hours for this interval
-	if job.InvoiceInterval <= 0 {
-		log.Printf("CreateInvoice: Invalid InvoiceInterval (%d) for job %s", job.InvoiceInterval, req.JobID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid job configuration prevents invoice creation"})
-		return
-	}
-
-	maxPossibleIntervals := job.Duration / job.InvoiceInterval
-	remainderHours := job.Duration % job.InvoiceInterval
-	isPartialLastInterval := remainderHours != 0
-	if isPartialLastInterval {
-		maxPossibleIntervals++
-	}
-
-	if nextIntervalNumber > maxPossibleIntervals {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Cannot create invoice for interval %d: exceeds maximum possible intervals (%d) for job duration", nextIntervalNumber, maxPossibleIntervals)})
-		return
-	}
-
-	// Determine hours for this specific invoice (in case of a partial last interval)
-	var hoursForThisInterval int
-	isLastInterval := (nextIntervalNumber == maxPossibleIntervals)
-
-	if isLastInterval && isPartialLastInterval {
-		hoursForThisInterval = remainderHours
-	} else {
-		// It's either not the last interval, or the last interval is a full one
-		hoursForThisInterval = job.InvoiceInterval
-	}
-
-	// 7. Calculate base value using hoursForThisInterval and apply adjustment
-	baseValue := job.Rate * float64(hoursForThisInterval) // Use calculated hours
-	finalValue := baseValue
-	if req.Adjustment != nil {
-		finalValue += *req.Adjustment
-	}
-	if finalValue < 0 { // Ensure non-negative value
-		finalValue = 0
-	}
-
-	// 8. Construct models.Invoice object
-	invoiceToCreate := &models.Invoice{
-		ID:             uuid.New(),
-		JobID:          req.JobID,
-		Value:          finalValue,
-		IntervalNumber: nextIntervalNumber,
-		State:          models.InvoiceStateWaiting,
-	}
-
-	// 9. Call repo Create
-	createdInvoice, err := h.invoiceRepo.Create(c.Request.Context(), invoiceToCreate)
-	if err != nil {
-		if errors.Is(err, storage.ErrConflict) {
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Invoice for interval %d already exists for this job", nextIntervalNumber)})
+		if errors.Is(err, services.ErrConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Invoice for this interval already exists"})
+		} else if errors.Is(err, services.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User is not the contractor for this job or job not ongoing"})
+		} else if errors.Is(err, services.ErrInvalidState) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Job is not in a valid state for invoice creation"})
+		} else if errors.Is(err, services.ErrInvalidInvoiceInterval) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invoice interval exceeds job duration"})
 		} else {
 			log.Printf("CreateInvoice: Error saving invoice for job %s: %v", req.JobID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create invoice"})
@@ -199,36 +119,18 @@ func (h *InvoiceHandler) GetInvoiceByID(c *gin.Context) {
 	}
 
 	// Create dto.GetInvoiceByIDRequest
-	req := dto.GetInvoiceByIDRequest{ID: invoiceID}
+	req := dto.GetInvoiceByIDRequest{ID: invoiceID, UserId: userID}
 
-	// Call h.invoiceRepo.GetByID
-	invoice, err := h.invoiceRepo.GetByID(c.Request.Context(), &req)
+	invoice, err := h.service.GetInvoiceByID(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found"})
-		} else {
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User not associated with this invoice's job"})
+		}else {
 			log.Printf("GetInvoiceByID: Error fetching invoice %s: %v", invoiceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoice"})
 		}
-		return
-	}
-
-	// Fetch associated Job using h.jobRepo.GetByID(invoice.JobID) for auth check
-	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
-	job, err := h.jobRepo.GetByID(c.Request.Context(), &jobReq)
-	if err != nil {
-		// If job not found, something is wrong with data integrity or invoice shouldn't exist
-		log.Printf("GetInvoiceByID: Error fetching job %s associated with invoice %s: %v", invoice.JobID, invoiceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify invoice association"})
-		return
-	}
-
-	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
-	isEmployer := job.EmployerID == userID
-	isContractor := job.ContractorID != nil && *job.ContractorID == userID
-	if !(isEmployer || isContractor) {
-		log.Printf("GetInvoiceByID: Forbidden attempt by user %s on invoice %s (job %s)", userID, invoiceID, job.ID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: You are not associated with this invoice's job"})
 		return
 	}
 
@@ -274,34 +176,13 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 		return
 	}
 
-	// Fetch Job using h.jobRepo.GetByID(JobID) to verify existence and for auth check.
-	jobReq := dto.GetJobByIDRequest{ID: jobID}
-	job, err := h.jobRepo.GetByID(c.Request.Context(), &jobReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-		} else {
-			log.Printf("ListInvoicesByJob: Error fetching job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve job details"})
-		}
-		return
-	}
-
-	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
-	isEmployer := job.EmployerID == userID
-	isContractor := job.ContractorID != nil && *job.ContractorID == userID
-	if !(isEmployer || isContractor) {
-		log.Printf("ListInvoicesByJob: Forbidden attempt by user %s on job %s", userID, jobID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: You are not associated with this job"})
-		return
-	}
-
 	// Bind/Validate query params into dto.ListInvoicesByJobRequest
 	var req dto.ListInvoicesByJobRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
 		return
 	}
+	req.JobID = jobID // Set JobID from path
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -310,14 +191,18 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 	if req.Limit <= 0 { req.Limit = 10 }
 	if req.Offset < 0 { req.Offset = 0 }
 
-	// Set JobID on DTO from path param
-	req.JobID = jobID
+	req.UserId = userID
 
-	// Call h.invoiceRepo.ListByJob
-	invoices, err := h.invoiceRepo.ListByJob(c.Request.Context(), &req)
+	invoices, err := h.service.ListInvoicesByJob(c.Request.Context(), &req)
 	if err != nil {
-		log.Printf("ListInvoicesByJob: Error listing invoices for job %s: %v", jobID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoices"})
+		if errors.Is(err, services.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User not associated with this job"})
+		} else {
+			log.Printf("ListInvoicesByJob: Error listing invoices for job %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoices"})
+		}
 		return
 	}
 
@@ -377,48 +262,16 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 		return
 	}
 
-	// Fetch Invoice
-	getReq := dto.GetInvoiceByIDRequest{ID: invoiceID}
-	invoice, err := h.invoiceRepo.GetByID(c.Request.Context(), &getReq)
+	req.UserId = userID
+
+	updatedInvoice, err := h.service.UpdateInvoiceState(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found"})
-		} else {
-			log.Printf("UpdateInvoiceState: Error fetching invoice %s: %v", invoiceID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoice"})
-		}
-		return
-	}
-
-	// Fetch Job for Auth Check
-	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
-	job, err := h.jobRepo.GetByID(c.Request.Context(), &jobReq)
-	if err != nil {
-		log.Printf("UpdateInvoiceState: Error fetching job %s associated with invoice %s: %v", invoice.JobID, invoiceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify invoice association"})
-		return
-	}
-
-	// --- Authorization Check: ONLY Contractor ---
-	isContractor := job.ContractorID != nil && *job.ContractorID == userID
-	if !isContractor {
-		log.Printf("UpdateInvoiceState: Forbidden attempt by user %s (not contractor %v) for invoice %s", userID, job.ContractorID, invoiceID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can update the invoice state"})
-		return
-	}
-	// --- End Auth Check ---
-
-	// Check State Transition
-	if !isValidInvoiceStateTransition(invoice.State, req.NewState) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid state transition from %s to %s", invoice.State, req.NewState)})
-		return
-	}
-
-	// Call Repo UpdateState
-	updatedInvoice, err := h.invoiceRepo.UpdateState(c.Request.Context(), &req)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User is not the contractor for this invoice's job"})
+		} else if errors.Is(err, services.ErrInvalidTransition) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid state transition"})
 		} else {
 			log.Printf("UpdateInvoiceState: Error updating invoice state %s: %v", invoiceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update invoice state"})
@@ -463,52 +316,20 @@ func (h *InvoiceHandler) DeleteInvoice(c *gin.Context) {
 		return
 	}
 
-	// Fetch Invoice
-	getReq := dto.GetInvoiceByIDRequest{ID: invoiceID}
-	invoice, err := h.invoiceRepo.GetByID(c.Request.Context(), &getReq)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found"})
-		} else {
-			log.Printf("DeleteInvoice: Error fetching invoice %s: %v", invoiceID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoice"})
-		}
-		return
-	}
-
-	// Fetch Job for Auth Check
-	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
-	job, err := h.jobRepo.GetByID(c.Request.Context(), &jobReq)
-	if err != nil {
-		log.Printf("DeleteInvoice: Error fetching job %s associated with invoice %s: %v", invoice.JobID, invoiceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify invoice association"})
-		return
-	}
-
-	// --- Authorization Check: ONLY Contractor + State Waiting ---
-	isContractor := job.ContractorID != nil && *job.ContractorID == userID
-	if !isContractor {
-		log.Printf("DeleteInvoice: Forbidden attempt by user %s (not contractor %v) for invoice %s", userID, job.ContractorID, invoiceID)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Only the assigned contractor can delete this invoice"})
-		return
-	}
-	if invoice.State != models.InvoiceStateWaiting {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot delete an invoice that is not in 'Waiting' state"})
-		return
-	}
-	// --- End Auth Check ---
-
 	// Create Delete Request DTO
-	req := dto.DeleteInvoiceRequest{ID: invoiceID}
+	req := dto.DeleteInvoiceRequest{ID: invoiceID, UserId: userID}
 
-	// Call Repo Delete
-	err = h.invoiceRepo.Delete(c.Request.Context(), &req)
+	err = h.service.DeleteInvoice(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found"})
+		if errors.Is(err, services.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found during update"})
+		} else if errors.Is(err, services.ErrForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User is not the contractor for this invoice's job"})
+		} else if errors.Is(err, services.ErrInvalidTransition) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid state transition"})
 		} else {
-			log.Printf("DeleteInvoice: Error deleting invoice %s: %v", invoiceID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete invoice"})
+			log.Printf("UpdateInvoiceState: Error updating invoice state %s: %v", invoiceID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update invoice state"})
 		}
 		return
 	}

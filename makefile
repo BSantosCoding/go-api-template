@@ -23,7 +23,8 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 	install-migrate install-swag install-air \
 	check-migrate check-swag check-air check-db-url \
 	docker-build docker-build-nocache docker-up docker-down docker-stop docker-logs docker-logs-api docker-logs-db docker-exec-api \
-	docker-migrate-up docker-migrate-down docker-migrate-status docker-migrate-force docker-db-reset
+	docker-migrate-up docker-migrate-down docker-migrate-status docker-migrate-force docker-db-reset \
+	mocks clean-mocks
 
 # Default target when running 'make'
 .DEFAULT_GOAL := help
@@ -287,6 +288,26 @@ check-db-url:
 		echo "Warning: Host DATABASE_URL not set (needed for local 'make migrate-*')."; \
 	fi
 
+# --- Mocks for testing ---
+
+# Generate mocks for repositories and services
+mocks: clean-mocks ## Generate mocks for repositories and services using mockgen
+	@echo "Generating mocks..."
+	@go install github.com/golang/mock/mockgen@latest # Ensure mockgen is installed
+	@mkdir -p internal/mocks # Ensure the directory exists
+	@echo "Generating repository mocks (storage)..."
+	@mockgen -package=mocks -destination=internal/mocks/mock_storage.go go-api-template/internal/storage UserRepository,JobRepository,InvoiceRepository
+	@echo "Generating service mocks..."
+	@mockgen -package=mocks -destination=internal/mocks/mock_services.go go-api-template/internal/services UserService,JobService,InvoiceService
+	@echo "Mocks generated."
+
+# Clean generated mocks
+clean-mocks: ## Remove generated mock files from internal/mocks
+	@echo "Cleaning mocks..."
+	@rm -f internal/mocks/mock_storage.go
+	@rm -f internal/mocks/mock_services.go
+	@echo "Mocks cleaned."
+
 # --- Update Help Target ---
 help: ## Display this help screen
 	@echo "Usage: make <command>"
@@ -301,4 +322,6 @@ help: ## Display this help screen
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'	@echo ""
 	@echo "Available tool commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'install-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
+	@echo ""
+	@echo "Available Testing/Mocks commands:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(mocks|clean-mocks)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'

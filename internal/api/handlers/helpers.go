@@ -34,8 +34,6 @@ func FormatValidationErrors(err error) map[string]string {
 	return errorsMap
 }
 
-// --- Helper Functions ---
-
 // MapUserModelToUserResponse converts a models.User to a dto.UserResponse
 func MapUserModelToUserResponse(user *models.User) dto.UserResponse {
 	return dto.UserResponse{
@@ -64,22 +62,6 @@ func MapJobModelToJobResponse(job *models.Job) dto.JobResponse {
 	return resp
 }
 
-// isValidJobStateTransition checks if moving from current to next state is allowed.
-func isValidJobStateTransition(current, next models.JobState) bool {
-	switch current {
-	case models.JobStateWaiting: // Assuming 'Waiting' is the initial state before 'Ongoing'
-		return next == models.JobStateOngoing
-	case models.JobStateOngoing:
-		return next == models.JobStateComplete
-	case models.JobStateComplete:
-		return next == models.JobStateArchived
-	case models.JobStateArchived:
-		return false // Cannot transition from Archived
-	default:
-		return false
-	}
-}
-
 // MapInvoiceModelToInvoiceResponse converts a models.Invoice to a dto.InvoiceResponse
 func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceResponse {
 	return dto.InvoiceResponse{
@@ -90,17 +72,5 @@ func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceRespon
 		IntervalNumber: invoice.IntervalNumber,
 		CreatedAt:      invoice.CreatedAt,
 		UpdatedAt:      invoice.UpdatedAt,
-	}
-}
-
-// isValidInvoiceStateTransition checks if moving from current to next state is allowed.
-func isValidInvoiceStateTransition(current, next models.InvoiceState) bool {
-	switch current {
-	case models.InvoiceStateWaiting:
-		return next == models.InvoiceStateComplete
-	case models.InvoiceStateComplete:
-		return false // Cannot transition from Complete
-	default:
-		return false
 	}
 }

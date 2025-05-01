@@ -6,6 +6,7 @@ import (
 	"go-api-template/internal/api/handlers"
 	"go-api-template/internal/api/middleware"
 	"go-api-template/internal/app"
+	"go-api-template/internal/services"
 	"log" // Keep log if you want the startup message
 
 	"github.com/gin-gonic/gin"
@@ -20,10 +21,15 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	// --- Base API Group ---
 	apiV1 := router.Group("/api/v1")
 
+	//Create services
+	userService := services.NewUserService(app.UserRepo, app.Config.JWT.Secret, app.Config.JWT.Expiration)
+	jobService := services.NewJobService(app.JobRepo, app.UserRepo)
+	invoiceService := services.NewInvoiceService(app.InvoiceRepo, app.JobRepo)
+
 	//Create handlers
-	userHandler := handlers.NewUserHandler(app.UserRepo, app.Validator, app.Config.JWT.Secret, app.Config.JWT.Expiration)
-	jobHandler := handlers.NewJobHandler(app.JobRepo, app.Validator)
-	invoiceHandler := handlers.NewInvoiceHandler(app.InvoiceRepo, app.JobRepo, app.Validator)
+	userHandler := handlers.NewUserHandler(userService, app.Validator)
+	jobHandler := handlers.NewJobHandler(jobService, app.Validator)
+	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, app.Validator)
 
 	// --- Middleware ---
 	authMiddleware := middleware.JWTAuthMiddleware(app.Config.JWT.Secret)
