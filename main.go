@@ -3,10 +3,15 @@
 package main
 
 import (
+	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"go-api-template/config"
 	"go-api-template/internal/app"
+	"go-api-template/internal/blockchain"
 	"go-api-template/internal/database"
 	"go-api-template/internal/server"
 	"go-api-template/internal/storage/postgres"
@@ -48,6 +53,21 @@ func main() {
 	}
 	defer dbPool.Close()
 
+	// --- Initialize Blockchain Event Listener ---
+	var eventListener *blockchain.EventListener
+	if cfg.Blockchain.RPCURL != "" && cfg.Blockchain.ContractAddress != "" && cfg.Blockchain.ContractABIPath != "" {
+		var err error
+		eventListener, err = blockchain.NewEventListener(cfg.Blockchain.RPCURL, cfg.Blockchain.ContractAddress, cfg.Blockchain.ContractABIPath /*, pass services here */)
+		if err != nil {
+			log.Printf("WARN: Failed to initialize blockchain event listener: %v. Continuing without listener.", err)
+		} else {
+			eventListener.Start(context.Background()) // Start listening in the background
+			log.Println("Blockchain event listener initialized and started")
+		}
+	} else {
+		log.Println("Blockchain listener configuration missing (RPC URL, Address, or ABI Path), skipping initialization.")
+	}
+
 	userRepo := postgres.NewUserRepo(dbPool)
 	jobRepo := postgres.NewJobRepo(dbPool)
 	invoiceRepo := postgres.NewInvoiceRepo(dbPool)
@@ -64,8 +84,24 @@ func main() {
 	}
 
 	srv := server.NewServer(application)
-	if err := srv.Start(); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// --- Graceful Shutdown Handling ---
+	go func() {
+		if err := srv.Start(); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit // Block until a signal is received
+
+	log.Println("Shutting down server and listener...")
+
+	// Stop the listener (if initialized)
+	if eventListener != nil {
+		eventListener.Stop()
 	}
+
+	log.Println("Application gracefully stopped.")
 }
 

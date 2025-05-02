@@ -43,6 +43,8 @@ func NewServer(app *app.Application) *Server {
 	router.Use(cors.New(corsConfig))
 	// --- End CORS Configuration ---
 
+	router.SetTrustedProxies(nil) // Remove the gin warning about untrusted proxies
+
 	return &Server{
 		router: router,
 		app:    app,
