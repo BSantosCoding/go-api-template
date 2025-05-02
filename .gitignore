@@ -60,3 +60,7 @@ Thumbs.db
 # Generally, .dockerignore handles the Docker build context well.
 # No common Docker runtime files need ignoring here usually.
 
+
+# Go test coverage files
+coverage.html
+coverage.out

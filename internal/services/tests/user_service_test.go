@@ -198,7 +198,7 @@ func TestUserService_Login(t *testing.T) {
 				Password: "password123",
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.LoginRequest) {
-				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(nil, services.ErrInvalidCredentials).Times(1)
+				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectToken:   false,
@@ -517,7 +517,7 @@ func TestUserService_GetByID(t *testing.T) {
 				ID: uuid.New(), // Different ID
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.GetUserByIdRequest) {
-				repo.EXPECT().GetByID(gomock.Any(), req).Return(nil, services.ErrNotFound).Times(1)
+				repo.EXPECT().GetByID(gomock.Any(), req).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectedError: services.ErrNotFound, // Service maps this
@@ -600,7 +600,7 @@ func TestUserService_GetByEmail(t *testing.T) {
 				Email: "notfound@example.com",
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.GetUserByEmailRequest) {
-				repo.EXPECT().GetByEmail(gomock.Any(), req).Return(nil, services.ErrNotFound).Times(1)
+				repo.EXPECT().GetByEmail(gomock.Any(), req).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectedError: services.ErrNotFound, // Service maps this
