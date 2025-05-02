@@ -17,6 +17,7 @@ type Config struct {
 	DB     DBConfig     `mapstructure:"database"`
 	CORS   CORSConfig   `mapstructure:"cors"`
 	JWT    JWTConfig    `mapstructure:"jwt"`
+	Blockchain BlockchainConfig `mapstructure:"blockchain"`
 }
 
 // ServerConfig holds server specific configuration
@@ -46,6 +47,14 @@ type JWTConfig struct {
 	Expiration       time.Duration `mapstructure:"-"`                  // Calculated duration, ignore during unmarshal
 }
 
+// BlockchainConfig holds blockchain interaction configuration
+type BlockchainConfig struct {
+	RPCURL          string `mapstructure:"rpc_url"`
+	ContractAddress string `mapstructure:"contract_address"`
+	ContractABIPath string `mapstructure:"contract_abi_path"`
+	Expiration       time.Duration `mapstructure:"-"`                  // Calculated duration, ignore during unmarshal
+}
+
 // Load configuration from file and environment variables
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
@@ -65,6 +74,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.name", "api_db")
 	viper.SetDefault("jwt.secret", "default-insecure-secret-key-change-me!") // !! CHANGE THIS VIA ENV !!
 	viper.SetDefault("jwt.expiration_minutes", 60)
+
+	// Defaults for Blockchain Listener 
+	viper.SetDefault("blockchain.rpc_url", "wss://ethereum-sepolia-rpc.publicnode.com") 
+	viper.SetDefault("blockchain.contract_address", "0x694AA1769357215DE4FAC081bf1f309aDC325306") // (Sepolia ETH/USD on Chainlink aggregator)
+	viper.SetDefault("blockchain.contract_abi_path", "config/abi/AggregatorV3Interface.abi.json") // Random price aggregator for example
 
 	// Default CORS: Allow common local dev origins and maybe wildcard for simple setup
 	// For production, this SHOULD be overridden by environment variables.
@@ -86,6 +100,9 @@ func Load() (*Config, error) {
 	viper.BindEnv("cors.allowed_origins", "CORS_ALLOWED_ORIGINS")
 	viper.BindEnv("jwt.secret", "API_JWT_SECRET")
 	viper.BindEnv("jwt.expiration_minutes", "API_JWT_EXPIRATION_MINUTES")
+	viper.BindEnv("blockchain.rpc_url", "BLOCKCHAIN_RPC_URL")
+	viper.BindEnv("blockchain.contract_address", "CONTRACT_ADDRESS")
+	viper.BindEnv("blockchain.contract_abi_path", "CONTRACT_ABI_PATH")
 
 	// --- Unmarshal Config ---
 	var cfg Config
@@ -139,6 +156,17 @@ func Load() (*Config, error) {
 		if exp, err := strconv.Atoi(expStr); err == nil {
 			cfg.JWT.ExpirationMinutes = exp
 		}
+	}
+
+	// Blockchain Overrides
+	if rpcURL := os.Getenv("BLOCKCHAIN_RPC_URL"); rpcURL != "" {
+		cfg.Blockchain.RPCURL = rpcURL
+	}
+	if contractAddr := os.Getenv("CONTRACT_ADDRESS"); contractAddr != "" {
+		cfg.Blockchain.ContractAddress = contractAddr
+	}
+	if abiPath := os.Getenv("CONTRACT_ABI_PATH"); abiPath != "" {
+		cfg.Blockchain.ContractABIPath = abiPath
 	}
 
 	// --- Calculate derived values ---

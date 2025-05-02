@@ -66,6 +66,12 @@ The following Go tools are used, but the Makefile can install them for you:
 
     # CORS Allowed Origins (comma-separated) - OVERRIDE FOR PRODUCTION!
     CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+    # Blockchain listener configuration
+    BLOCKCHAIN_RPC_URL="wss://ethereum-sepolia-rpc.publicnode.com"
+    CONTRACT_ADDRESS="0x694AA1769357215DE4FAC081bf1f309aDC325306" # Chainlink ETH/USD on Sepolia
+    CONTRACT_ADDRESS_AGGREGATOR="0x719E22E3D4b690E5d96cCb40619180B5427F14AE" # Underlying aggregator contract
+    CONTRACT_ABI_PATH="config/abi/AggregatorV3Interface.abi.json" # Relative path to ABI file
     EOF
     ```
 
@@ -134,10 +140,12 @@ The `Makefile` provides convenient shortcuts for common tasks:
 
   - `make dev`: (Alias for `make docker-up`) Starts services with hot-reloading.
   - `make swagger-gen`: Manually regenerate Swagger documentation files (`/docs`).
+  - `make test`: Run all Go unit and integration tests.
 
 - **Docker:**
 
   - `make docker-build`: Build/rebuild Docker images.
+  - `make docker-build-nocache`: Build or rebuild the docker images using docker-compose without cache.
   - `make docker-up`: Start services in detached mode.
   - `make docker-down`: Stop and remove containers and associated volumes (including DB data!).
   - `make docker-stop`: Stop running containers without removing them.
@@ -145,12 +153,14 @@ The `Makefile` provides convenient shortcuts for common tasks:
   - `make docker-logs-api`: Follow logs from the `api` service only.
   - `make docker-logs-db`: Follow logs from the `db` service only.
   - `make docker-exec-api CMD="..."`: Execute a command inside the running `api` container (e.g., `make docker-exec-api CMD="ls -l"`).
+  - `make docker-db-reset`: !! Drops and recreates the database in the Docker container (DATA LOSS!) !!
 
 - **Database Migrations (Docker):**
 
   - `make docker-migrate-up`: Apply pending migrations inside the `api` container. (Also runs automatically on `make docker-up`).
   - `make docker-migrate-down`: Revert the last applied migration inside the `api` container.
   - `make docker-migrate-status`: Check migration status inside the `api` container.
+  - `make docker-migrate-force VERSION=...`: Force migration version inside the api container (use with extreme caution!).
 
 - **Database Migrations (Local - requires `migrate` CLI and DB access from host):**
 
@@ -158,12 +168,18 @@ The `Makefile` provides convenient shortcuts for common tasks:
   - `make migrate-up`: Apply pending migrations using `DATABASE_URL` from `.env`/environment.
   - `make migrate-down`: Revert the last migration using `DATABASE_URL`.
   - `make migrate-status`: Check migration status using `DATABASE_URL`.
+  - `make migrate-down-all`: Revert all migrations (use with caution!).
   - `make migrate-force VERSION=...`: Force migration version (use with caution).
 
 - **Tool Installation:**
+
   - `make install-migrate`: Install `golang-migrate` CLI.
   - `make install-swag`: Install `swag` CLI.
   - `make install-air`: Install `air` CLI.
+
+- **Testing/Mocks:**
+  - `make mocks`: Generate mocks for repositories and services using mockgen.
+  - `make clean-mocks`: Remove generated mock files from internal/mocks.
 
 ## Configuration
 
