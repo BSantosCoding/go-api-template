@@ -315,7 +315,6 @@ func TestUserService_Update(t *testing.T) {
 			expectedUser:  nil,
 			expectedError: repoErrDbWriteFailed, // Service currently passes through
 		},
-		// Add TestUserService_Update_Forbidden here if/when authorization is added
 	}
 
 	for _, tt := range tests {

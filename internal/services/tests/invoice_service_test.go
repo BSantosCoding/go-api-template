@@ -18,9 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Helper to create a pointer to a InvoiceState
-func ptrInvoiceState(s models.InvoiceState) *models.InvoiceState { return &s }
-
 func setupInvoiceServiceTest(t *testing.T) (context.Context, services.InvoiceService, *mock_storage.MockInvoiceRepository, *mock_storage.MockJobRepository, *gomock.Controller) {
 	ctrl := gomock.NewController(t)
 	mockInvoiceRepo := mock_storage.NewMockInvoiceRepository(ctrl)
@@ -30,913 +27,1436 @@ func setupInvoiceServiceTest(t *testing.T) (context.Context, services.InvoiceSer
 	return ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl
 }
 
-func TestInvoiceService_CreateInvoice_Success_FullInterval(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{
-		JobID:  jobID,
-		UserId: contractorID,
+func TestInvoiceService_CreateInvoice(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockInvoiceRepoGetMaxIntervalForJob struct {
+		req *dto.GetMaxIntervalForJobRequest
+		res int
+		err error
+	}
+	type mockInvoiceRepoCreate struct {
+		req *models.Invoice // Use gomock.Any() for matching input
+		res *models.Invoice
+		err error
 	}
 
-	mockJob := &models.Job{
-		ID:              jobID,
-		EmployerID:      uuid.New(),
-		ContractorID:    &contractorID,
-		State:           models.JobStateOngoing, // Correct state
-		Rate:            100.0,
-		Duration:        40,
-		InvoiceInterval: 10, // 4 intervals
+	tests := []struct {
+		name                                string
+		req                                 *dto.CreateInvoiceRequest
+		mockJobRepoGetByID                  mockJobRepoGetByID
+		mockInvoiceRepoGetMaxIntervalForJob mockInvoiceRepoGetMaxIntervalForJob
+		mockInvoiceRepoCreate               mockInvoiceRepoCreate
+		expectedInvoice                     *models.Invoice // For successful cases
+		expectedErr                         error
+		assertInvoice                       func(*testing.T, *models.Invoice, *models.Invoice) // Custom assertion for invoice
+	}{
+		{
+			name: "Success_FullInterval",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Rate:            100.0,
+					Duration:        40,
+					InvoiceInterval: 10,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 1,
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{
+				req: nil, // Use gomock.Any()
+				res: &models.Invoice{
+					ID:             uuid.New(), // Simulate repo generating ID
+					JobID:          uuid.Nil,   
+					IntervalNumber: 2,          // Expected next interval
+					Value:          100.0 * 10, // Expected value
+					State:          models.InvoiceStateWaiting,
+					CreatedAt:      time.Now(), // Simulate repo setting time
+					UpdatedAt:      time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{
+				ID:             uuid.Nil, 
+				JobID:          uuid.Nil, 
+				IntervalNumber: 2,
+				Value:          100.0 * 10,
+				State:          models.InvoiceStateWaiting,
+				CreatedAt:      time.Now(), // Will be asserted loosely
+				UpdatedAt:      time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertInvoice: func(t *testing.T, expected, actual *models.Invoice) {
+				assert.NotEqual(t, uuid.Nil, actual.ID) // Ensure ID was generated
+				assert.Equal(t, expected.JobID, actual.JobID)
+				assert.Equal(t, expected.IntervalNumber, actual.IntervalNumber)
+				assert.Equal(t, expected.Value, actual.Value)
+				assert.Equal(t, expected.State, actual.State)
+				// Loosely assert time fields
+				assert.WithinDuration(t, expected.CreatedAt, actual.CreatedAt, time.Second)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "Success_PartialLastInterval",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Rate:            50.0,
+					Duration:        35, // 3 full intervals (10) + 1 partial (5) = 4 intervals total
+					InvoiceInterval: 10,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 3, // Previous interval was 3, this is the 4th (last)
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{
+				req: nil, // Use gomock.Any()
+				res: &models.Invoice{
+					ID:             uuid.New(), // Simulate repo generating ID
+					JobID:          uuid.Nil,   
+					IntervalNumber: 4,          // Expected next interval
+					Value:          50.0 * 5,   // Expected value (remainder hours)
+					State:          models.InvoiceStateWaiting,
+					CreatedAt:      time.Now(), // Simulate repo setting time
+					UpdatedAt:      time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{
+				ID:             uuid.Nil, 
+				JobID:          uuid.Nil, 
+				IntervalNumber: 4,
+				Value:          50.0 * 5,
+				State:          models.InvoiceStateWaiting,
+				CreatedAt:      time.Now(), // Will be asserted loosely
+				UpdatedAt:      time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertInvoice: func(t *testing.T, expected, actual *models.Invoice) {
+				assert.NotEqual(t, uuid.Nil, actual.ID) // Ensure ID was generated
+				assert.Equal(t, expected.JobID, actual.JobID)
+				assert.Equal(t, expected.IntervalNumber, actual.IntervalNumber)
+				assert.Equal(t, expected.Value, actual.Value)
+				assert.Equal(t, expected.State, actual.State)
+				// Loosely assert time fields
+				assert.WithinDuration(t, expected.CreatedAt, actual.CreatedAt, time.Second)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "Success_WithAdjustment",
+			req: &dto.CreateInvoiceRequest{
+				JobID:      uuid.New(),
+				UserId:     uuid.New(),
+				Adjustment: ptrFloat64(-25.50),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Rate:            100.0,
+					Duration:        40,
+					InvoiceInterval: 10,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 0,
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{
+				req: nil, // Use gomock.Any()
+				res: &models.Invoice{
+					ID:             uuid.New(), // Simulate repo generating ID
+					JobID:          uuid.Nil,   
+					IntervalNumber: 1,          // Expected next interval
+					Value:          (100.0 * 10) - 25.50, // Expected value with adjustment
+					State:          models.InvoiceStateWaiting,
+					CreatedAt:      time.Now(), // Simulate repo setting time
+					UpdatedAt:      time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{
+				ID:             uuid.Nil, 
+				JobID:          uuid.Nil, 
+				IntervalNumber: 1,
+				Value:          (100.0 * 10) - 25.50,
+				State:          models.InvoiceStateWaiting,
+				CreatedAt:      time.Now(), // Will be asserted loosely
+				UpdatedAt:      time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertInvoice: func(t *testing.T, expected, actual *models.Invoice) {
+				assert.NotEqual(t, uuid.Nil, actual.ID) // Ensure ID was generated
+				assert.Equal(t, expected.JobID, actual.JobID)
+				assert.Equal(t, expected.IntervalNumber, actual.IntervalNumber)
+				assert.Equal(t, expected.Value, actual.Value)
+				assert.Equal(t, expected.State, actual.State)
+				// Loosely assert time fields
+				assert.WithinDuration(t, expected.CreatedAt, actual.CreatedAt, time.Second)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "Error_JobNotFound",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{}, // Not called
+			mockInvoiceRepoCreate:               mockInvoiceRepoCreate{},               // Not called
+			expectedInvoice:                     nil,
+			expectedErr:                         services.ErrNotFound,
+			assertInvoice:                       nil,
+		},
+		{
+			name: "Error_JobRepoError",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{}, // Not called
+			mockInvoiceRepoCreate:               mockInvoiceRepoCreate{},               // Not called
+			expectedInvoice:                     nil,
+			expectedErr:                         errors.New("internal error creating job: db error"), // Service wraps the error
+			assertInvoice:                       nil,
+		},
+		{
+			name: "Error_Forbidden_NotContractor",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(), // Different user
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					ContractorID: ptrUUID(uuid.New()), // Actual contractor
+					State:        models.JobStateOngoing,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{}, // Not called
+			mockInvoiceRepoCreate:               mockInvoiceRepoCreate{},               // Not called
+			expectedInvoice:                     nil,
+			expectedErr:                         services.ErrForbidden,
+			assertInvoice:                       nil,
+		},
+		{
+			name: "Error_Forbidden_NoContractor",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					ContractorID: nil, // No contractor
+					State:        models.JobStateOngoing,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{}, // Not called
+			mockInvoiceRepoCreate:               mockInvoiceRepoCreate{},               // Not called
+			expectedInvoice:                     nil,
+			expectedErr:                         services.ErrForbidden,
+			assertInvoice:                       nil,
+		},
+		{
+			name: "Error_InvalidState_JobNotOngoing",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        models.JobStateWaiting, // Wrong state
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{}, // Not called
+			mockInvoiceRepoCreate:               mockInvoiceRepoCreate{},               // Not called
+			expectedInvoice:                     nil,
+			expectedErr:                         services.ErrInvalidState,
+			assertInvoice:                       nil,
+		},
+		{
+			name: "Error_GetMaxIntervalRepoError",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        models.JobStateOngoing,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 0,
+				err: errors.New("db error"),
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{}, // Not called
+			expectedInvoice:       nil,
+			expectedErr:           errors.New("internal error creating job: db error"), // Service wraps the error
+			assertInvoice:         nil,
+		},
+		{
+			name: "Error_InvalidInvoiceInterval_ZeroJobInterval",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					InvoiceInterval: 0, // Invalid interval
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 0,
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{}, // Not called
+			expectedInvoice:       nil,
+			expectedErr:           services.ErrInvalidInvoiceInterval,
+			assertInvoice:         nil,
+		},
+		{
+			name: "Error_InvalidInvoiceInterval_ExceedsMax",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Duration:        20,
+					InvoiceInterval: 10, // Max 2 intervals
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 2, // Already created 2 intervals
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{}, // Not called
+			expectedInvoice:       nil,
+			expectedErr:           services.ErrInvalidInvoiceInterval,
+			assertInvoice:         nil,
+		},
+		{
+			name: "Error_CreateRepoConflict",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Duration:        40,
+					InvoiceInterval: 10,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 0,
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{
+				req: nil, // Use gomock.Any()
+				res: nil,
+				err: storage.ErrConflict,
+			},
+			expectedInvoice: nil,
+			expectedErr:     services.ErrConflict,
+			assertInvoice:   nil,
+		},
+		{
+			name: "Error_CreateRepoError",
+			req: &dto.CreateInvoiceRequest{
+				JobID:  uuid.New(),
+				UserId: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:              uuid.Nil, 
+					EmployerID:      uuid.New(),
+					ContractorID:    ptrUUID(uuid.Nil), 
+					State:           models.JobStateOngoing,
+					Duration:        40,
+					InvoiceInterval: 10,
+				},
+				err: nil,
+			},
+			mockInvoiceRepoGetMaxIntervalForJob: mockInvoiceRepoGetMaxIntervalForJob{
+				req: &dto.GetMaxIntervalForJobRequest{JobID: uuid.Nil}, 
+				res: 0,
+				err: nil,
+			},
+			mockInvoiceRepoCreate: mockInvoiceRepoCreate{
+				req: nil,
+				res: nil,
+				err: errors.New("db write error"),
+			},
+			expectedInvoice: nil,
+			expectedErr:     errors.New("internal error creating job: db write error"), // Service wraps the error
+			assertInvoice:   nil,
+		},
 	}
 
-	maxIntervalNum := 1 // Previous interval was 1
-	nextIntervalNumber := maxIntervalNum + 1
-	hoursForThisInterval := mockJob.InvoiceInterval
-	expectedValue := mockJob.Rate * float64(hoursForThisInterval)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
+			defer ctrl.Finish()
 
-	expectedInvoice := &models.Invoice{
-		// ID will be generated by repo, but we need to match the input to Create
-		JobID:          jobID,
-		IntervalNumber: nextIntervalNumber,
-		Value:          expectedValue,
-		State:          models.InvoiceStateWaiting,
-	}
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			contractorID := uuid.New()
+			requestingUserID := uuid.New() // Use a different ID for the forbidden case
 
-	// Mock GetJobByID
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-	// Mock GetMaxIntervalForJob
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(maxIntervalNum, nil).Times(1)
-	// Mock Create
-	mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).DoAndReturn(
-		func(ctx context.Context, inv *models.Invoice) (*models.Invoice, error) {
-			// Assert the input to Create matches expectations (except ID)
-			assert.Equal(t, expectedInvoice.JobID, inv.JobID)
-			assert.Equal(t, expectedInvoice.IntervalNumber, inv.IntervalNumber)
-			assert.Equal(t, expectedInvoice.Value, inv.Value)
-			assert.Equal(t, expectedInvoice.State, inv.State)
-			assert.NotEqual(t, uuid.Nil, inv.ID) // Ensure ID was generated
-			// Return the input invoice with a generated ID for the service result
-			inv.ID = uuid.New()
-			inv.CreatedAt = time.Now()
-			inv.UpdatedAt = time.Now()
-			return inv, nil
-		}).Times(1)
+			tt.req.JobID = jobID
+			// Set UserId based on the test case
+			if tt.name == "Error_Forbidden_NotContractor" || tt.name == "Error_Forbidden_NoContractor" {
+				tt.req.UserId = requestingUserID // This user is NOT the contractor
+			} else {
+				tt.req.UserId = contractorID // Assume the requesting user IS the contractor for other cases
+			}
 
-	invoice, err := invoiceService.CreateInvoice(ctx, req)
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.mockJobRepoGetByID.res.ContractorID != nil && tt.name != "Error_Forbidden_NoContractor" {
+					*tt.mockJobRepoGetByID.res.ContractorID = contractorID
+				}
+			}
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
 
-	require.NoError(t, err)
-	assert.NotNil(t, invoice)
-	assert.Equal(t, jobID, invoice.JobID)
-	assert.Equal(t, nextIntervalNumber, invoice.IntervalNumber)
-	assert.Equal(t, expectedValue, invoice.Value)
-	assert.Equal(t, models.InvoiceStateWaiting, invoice.State)
-}
+			if tt.mockInvoiceRepoGetMaxIntervalForJob.req != nil {
+				tt.mockInvoiceRepoGetMaxIntervalForJob.req.JobID = jobID
+			}
 
-func TestInvoiceService_CreateInvoice_Success_PartialLastInterval(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
+			if tt.mockInvoiceRepoCreate.res != nil {
+				tt.mockInvoiceRepoCreate.res.JobID = jobID
+				// Simulate repo setting times if not already set
+				if tt.mockInvoiceRepoCreate.res.CreatedAt.IsZero() {
+					tt.mockInvoiceRepoCreate.res.CreatedAt = time.Now()
+				}
+				if tt.mockInvoiceRepoCreate.res.UpdatedAt.IsZero() {
+					tt.mockInvoiceRepoCreate.res.UpdatedAt = time.Now()
+				}
+			}
+			if tt.expectedInvoice != nil {
+				tt.expectedInvoice.JobID = jobID
+				// Simulate repo setting times if not already set
+				if tt.expectedInvoice.CreatedAt.IsZero() {
+					tt.expectedInvoice.CreatedAt = time.Now()
+				}
+				if tt.expectedInvoice.UpdatedAt.IsZero() {
+					tt.expectedInvoice.UpdatedAt = time.Now()
+				}
+			}
 
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{
-		JobID:  jobID,
-		UserId: contractorID,
-	}
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockInvoiceRepoGetMaxIntervalForJob.req != nil {
+				mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, tt.mockInvoiceRepoGetMaxIntervalForJob.req).Return(tt.mockInvoiceRepoGetMaxIntervalForJob.res, tt.mockInvoiceRepoGetMaxIntervalForJob.err).Times(1)
+			}
+			if tt.mockInvoiceRepoCreate.res != nil || tt.mockInvoiceRepoCreate.err != nil {
+				mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).Return(tt.mockInvoiceRepoCreate.res, tt.mockInvoiceRepoCreate.err).Times(1)
+			}
 
-	mockJob := &models.Job{
-		ID:              jobID,
-		ContractorID:    &contractorID,
-		State:           models.JobStateOngoing,
-		Rate:            50.0,
-		Duration:        35, // 3 full intervals (10) + 1 partial (5) = 4 intervals total
-		InvoiceInterval: 10,
-	}
+			// Call the service method
+			invoice, err := invoiceService.CreateInvoice(ctx, tt.req)
 
-	maxIntervalNum := 3 // Previous interval was 3, this is the 4th (last)
-	nextIntervalNumber := maxIntervalNum + 1
-	remainderHours := mockJob.Duration % mockJob.InvoiceInterval // 5
-	expectedValue := mockJob.Rate * float64(remainderHours)
-
-	expectedInvoiceInput := &models.Invoice{
-		JobID:          jobID,
-		IntervalNumber: nextIntervalNumber,
-		Value:          expectedValue,
-		State:          models.InvoiceStateWaiting,
-	}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(maxIntervalNum, nil)
-	mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).DoAndReturn(
-		func(ctx context.Context, inv *models.Invoice) (*models.Invoice, error) {
-			assert.Equal(t, expectedInvoiceInput.JobID, inv.JobID)
-			assert.Equal(t, expectedInvoiceInput.IntervalNumber, inv.IntervalNumber)
-			assert.Equal(t, expectedInvoiceInput.Value, inv.Value)
-			assert.Equal(t, expectedInvoiceInput.State, inv.State)
-			inv.ID = uuid.New()
-			return inv, nil
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, invoice)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, invoice)
+				if tt.assertInvoice != nil {
+					tt.assertInvoice(t, tt.expectedInvoice, invoice)
+				} else {
+					assert.Equal(t, tt.expectedInvoice, invoice)
+				}
+			}
 		})
-
-	invoice, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.NoError(t, err)
-	assert.NotNil(t, invoice)
-	assert.Equal(t, nextIntervalNumber, invoice.IntervalNumber)
-	assert.Equal(t, expectedValue, invoice.Value)
+	}
 }
 
-func TestInvoiceService_CreateInvoice_Success_WithAdjustment(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	adjustment := -25.50
-	req := &dto.CreateInvoiceRequest{
-		JobID:      jobID,
-		UserId:     contractorID,
-		Adjustment: &adjustment,
+func TestInvoiceService_GetInvoiceByID(t *testing.T) {
+	type mockInvoiceRepoGetByID struct {
+		req *dto.GetInvoiceByIDRequest
+		res *models.Invoice
+		err error
+	}
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
 	}
 
-	mockJob := &models.Job{
-		ID:              jobID,
-		ContractorID:    &contractorID,
-		State:           models.JobStateOngoing,
-		Rate:            100.0,
-		Duration:        40,
-		InvoiceInterval: 10,
+	tests := []struct {
+		name                   string
+		req                    *dto.GetInvoiceByIDRequest
+		mockInvoiceRepoGetByID mockInvoiceRepoGetByID
+		mockJobRepoGetByID     mockJobRepoGetByID
+		expectedInvoice        *models.Invoice
+		expectedErr            error
+	}{
+		{
+			name: "Success_AsEmployer",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.Nil, ContractorID: ptrUUID(uuid.New())}, 
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+			expectedErr:     nil,
+		},
+		{
+			name: "Success_AsContractor",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()}, // Requesting user is contractor
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+			expectedErr:     nil,
+		},
+		{
+			name: "Error_InvoiceNotFound",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			expectedInvoice:    nil,
+			expectedErr:        services.ErrNotFound,
+		},
+		{
+			name: "Error_InvoiceRepoError",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			expectedInvoice:    nil,
+			expectedErr:        errors.New("internal error getting invoice: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_JobRepoError",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New()}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			expectedInvoice: nil,
+			expectedErr:     errors.New("internal error getting job: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_Forbidden",
+			req:  &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()}, // User not associated with the job
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New()}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), ContractorID: ptrUUID(uuid.New())}, 
+				err: nil,
+			},
+			expectedInvoice: nil,
+			expectedErr:     services.ErrForbidden,
+		},
 	}
 
-	maxIntervalNum := 0
-	nextIntervalNumber := 1
-	hoursForThisInterval := mockJob.InvoiceInterval
-	expectedBaseValue := mockJob.Rate * float64(hoursForThisInterval)
-	expectedFinalValue := expectedBaseValue + adjustment
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
+			defer ctrl.Finish()
 
-	expectedInvoiceInput := &models.Invoice{
-		JobID:          jobID,
-		IntervalNumber: nextIntervalNumber,
-		Value:          expectedFinalValue,
-		State:          models.InvoiceStateWaiting,
-	}
+			// Set dynamic UUIDs
+			invoiceID := uuid.New()
+			jobID := uuid.New()
+			employerID := uuid.New()
+			contractorID := uuid.New()
+			otherUserID := uuid.New()
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(maxIntervalNum, nil)
-	mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).DoAndReturn(
-		func(ctx context.Context, inv *models.Invoice) (*models.Invoice, error) {
-			assert.Equal(t, expectedInvoiceInput.Value, inv.Value) // Check adjusted value
-			inv.ID = uuid.New()
-			return inv, nil
+			tt.req.ID = invoiceID
+			if tt.name == "Success_AsEmployer" {
+				tt.req.UserId = employerID
+			} else if tt.name == "Success_AsContractor" {
+				tt.req.UserId = contractorID
+			} else if tt.name == "Error_Forbidden" {
+				tt.req.UserId = otherUserID
+			} else {
+				tt.req.UserId = uuid.New() // Default for other error cases
+			}
+
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				tt.mockInvoiceRepoGetByID.req.ID = invoiceID
+				tt.mockInvoiceRepoGetByID.req.UserId = tt.req.UserId // Match the request user ID
+			}
+			if tt.mockInvoiceRepoGetByID.res != nil {
+				tt.mockInvoiceRepoGetByID.res.ID = invoiceID
+				tt.mockInvoiceRepoGetByID.res.JobID = jobID
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				tt.mockJobRepoGetByID.res.EmployerID = employerID
+				if tt.mockJobRepoGetByID.res.ContractorID != nil {
+					*tt.mockJobRepoGetByID.res.ContractorID = contractorID
+				}
+			}
+
+			if tt.expectedInvoice != nil {
+				tt.expectedInvoice.ID = invoiceID
+				tt.expectedInvoice.JobID = jobID
+			}
+
+			// Setup mocks
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				mockInvoiceRepo.EXPECT().GetByID(ctx, tt.mockInvoiceRepoGetByID.req).Return(tt.mockInvoiceRepoGetByID.res, tt.mockInvoiceRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+
+			// Call the service method
+			invoice, err := invoiceService.GetInvoiceByID(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, invoice)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, invoice)
+				assert.Equal(t, tt.expectedInvoice, invoice)
+			}
 		})
-
-	invoice, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.NoError(t, err)
-	assert.NotNil(t, invoice)
-	assert.Equal(t, expectedFinalValue, invoice.Value)
+	}
 }
 
-func TestInvoiceService_CreateInvoice_Error_JobNotFound(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.CreateInvoiceRequest{JobID: uuid.New(), UserId: uuid.New()}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: req.JobID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestInvoiceService_CreateInvoice_Error_JobRepoError(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.CreateInvoiceRequest{JobID: uuid.New(), UserId: uuid.New()}
-	repoErr := errors.New("db error")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: req.JobID}).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error creating job") // Error message from service
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_CreateInvoice_Error_Forbidden_NotContractor(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	actualContractorID := uuid.New()
-	requestingUserID := uuid.New() // Different user
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: requestingUserID}
-
-	mockJob := &models.Job{ID: jobID, ContractorID: &actualContractorID, State: models.JobStateOngoing}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_CreateInvoice_Error_Forbidden_NoContractor(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	requestingUserID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: requestingUserID}
-
-	mockJob := &models.Job{ID: jobID, ContractorID: nil, State: models.JobStateOngoing} // No contractor
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_CreateInvoice_Error_InvalidState_JobNotOngoing(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateWaiting} // Wrong state
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestInvoiceService_CreateInvoice_Error_GetMaxIntervalRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateOngoing}
-	repoErr := errors.New("db error")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(0, repoErr).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error creating job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_CreateInvoice_Error_InvalidInvoiceInterval_ZeroJobInterval(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateOngoing, InvoiceInterval: 0} // Invalid interval
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(0, nil) // Assume this succeeds
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidInvoiceInterval))
-}
-
-func TestInvoiceService_CreateInvoice_Error_InvalidInvoiceInterval_ExceedsMax(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateOngoing, Duration: 20, InvoiceInterval: 10} // Max 2 intervals
-
-	maxIntervalNum := 2 // Already created 2 intervals
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(maxIntervalNum, nil)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidInvoiceInterval))
-}
-
-func TestInvoiceService_CreateInvoice_Error_CreateRepoConflict(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateOngoing, Duration: 40, InvoiceInterval: 10}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(0, nil)
-	mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).Return(nil, storage.ErrConflict).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrConflict))
-}
-
-func TestInvoiceService_CreateInvoice_Error_CreateRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.CreateInvoiceRequest{JobID: jobID, UserId: contractorID}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID, State: models.JobStateOngoing, Duration: 40, InvoiceInterval: 10}
-	repoErr := errors.New("db write error")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().GetMaxIntervalForJob(ctx, &dto.GetMaxIntervalForJobRequest{JobID: jobID}).Return(0, nil)
-	mockInvoiceRepo.EXPECT().Create(ctx, gomock.Any()).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.CreateInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error creating job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_GetInvoiceByID_Success_AsEmployer(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.GetInvoiceByIDRequest{ID: invoiceID, UserId: employerID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(mockInvoice, nil).Times(1)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-
-	invoice, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, mockInvoice, invoice)
-}
-
-func TestInvoiceService_GetInvoiceByID_Success_AsContractor(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.GetInvoiceByIDRequest{ID: invoiceID, UserId: contractorID} // Requesting user is contractor
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(mockInvoice, nil).Times(1)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-
-	invoice, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, mockInvoice, invoice)
-}
-
-func TestInvoiceService_GetInvoiceByID_Error_InvoiceNotFound(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestInvoiceService_GetInvoiceByID_Error_InvoiceRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.GetInvoiceByIDRequest{ID: uuid.New(), UserId: uuid.New()}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting invoice")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_GetInvoiceByID_Error_JobRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	req := &dto.GetInvoiceByIDRequest{ID: invoiceID, UserId: uuid.New()}
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_GetInvoiceByID_Error_Forbidden(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	otherUserID := uuid.New() // User not associated with the job
-	req := &dto.GetInvoiceByIDRequest{ID: invoiceID, UserId: otherUserID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID}
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, req).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-
-	_, err := invoiceService.GetInvoiceByID(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Success(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.InvoiceStateComplete
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: newState, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting} // Correct initial state
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-	updatedInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: newState, UpdatedAt: time.Now()}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil).Times(1)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-	mockInvoiceRepo.EXPECT().UpdateState(ctx, req).Return(updatedInvoice, nil).Times(1)
-
-	invoice, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedInvoice, invoice)
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_InvoiceNotFound(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: req.ID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_InvoiceRepoError_Get(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: req.ID}).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting invoice")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_JobRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: models.InvoiceStateComplete, UserId: uuid.New()}
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_Forbidden_NotContractor(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	actualContractorID := uuid.New()
-	requestingUserID := uuid.New() // Different user
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: models.InvoiceStateComplete, UserId: requestingUserID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &actualContractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_InvalidTransition(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.InvoiceStateWaiting // Invalid transition: Complete -> Waiting
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: newState, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateComplete} // Current state is Complete
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidTransition))
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_UpdateRepoNotFound(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.InvoiceStateComplete
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: newState, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().UpdateState(ctx, req).Return(nil, storage.ErrNotFound).Times(1) // Repo returns NotFound on Update
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound)) // Service maps this
-}
-
-func TestInvoiceService_UpdateInvoiceState_Error_UpdateRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.InvoiceStateComplete
-	req := &dto.UpdateInvoiceStateRequest{ID: invoiceID, NewState: newState, UserId: contractorID}
-	repoErr := errors.New("db write error")
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().UpdateState(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.UpdateInvoiceState(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error updating invoice")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_DeleteInvoice_Success(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting} // Correct state
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil).Times(1)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-	mockInvoiceRepo.EXPECT().Delete(ctx, req).Return(nil).Times(1)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.NoError(t, err)
-}
-
-func TestInvoiceService_DeleteInvoice_Error_InvoiceNotFound(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: req.ID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestInvoiceService_DeleteInvoice_Error_InvoiceRepoError_Get(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, _, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: req.ID}).Return(nil, repoErr).Times(1)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting invoice")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_DeleteInvoice_Error_JobRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: uuid.New()}
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	repoErr := errors.New("db error")
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_DeleteInvoice_Error_Forbidden_NotContractor(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	actualContractorID := uuid.New()
-	requestingUserID := uuid.New() // Different user
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: requestingUserID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &actualContractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_DeleteInvoice_Error_InvalidState_NotWaiting(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateComplete} // Wrong state
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestInvoiceService_DeleteInvoice_Error_DeleteRepoNotFound(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: contractorID}
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().Delete(ctx, req).Return(storage.ErrNotFound).Times(1) // Repo returns NotFound on Delete
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound)) // Service maps this
-}
-
-func TestInvoiceService_DeleteInvoice_Error_DeleteRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	invoiceID := uuid.New()
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.DeleteInvoiceRequest{ID: invoiceID, UserId: contractorID}
-	repoErr := errors.New("db delete error")
-
-	mockInvoice := &models.Invoice{ID: invoiceID, JobID: jobID, State: models.InvoiceStateWaiting}
-	mockJob := &models.Job{ID: jobID, ContractorID: &contractorID}
-
-	mockInvoiceRepo.EXPECT().GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceID}).Return(mockInvoice, nil)
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().Delete(ctx, req).Return(repoErr).Times(1)
-
-	err := invoiceService.DeleteInvoice(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error deleting invoice")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestInvoiceService_ListInvoicesByJob_Success_AsEmployer(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.ListInvoicesByJobRequest{JobID: jobID, UserId: employerID, Limit: 5, Offset: 0}
-
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
-	expectedInvoices := []models.Invoice{
-		{ID: uuid.New(), JobID: jobID, State: models.InvoiceStateWaiting},
-		{ID: uuid.New(), JobID: jobID, State: models.InvoiceStateComplete},
+func TestInvoiceService_UpdateInvoiceState(t *testing.T) {
+	type mockInvoiceRepoGetByID struct {
+		req *dto.GetInvoiceByIDRequest
+		res *models.Invoice
+		err error
+	}
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockInvoiceRepoUpdateState struct {
+		req *dto.UpdateInvoiceStateRequest
+		res *models.Invoice
+		err error
 	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-	mockInvoiceRepo.EXPECT().ListByJob(ctx, req).Return(expectedInvoices, nil).Times(1)
-
-	invoices, err := invoiceService.ListInvoicesByJob(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, expectedInvoices, invoices)
-}
-
-func TestInvoiceService_ListInvoicesByJob_Success_AsContractor(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.ListInvoicesByJobRequest{JobID: jobID, UserId: contractorID, Limit: 5, Offset: 0} // User is contractor
-
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
-	expectedInvoices := []models.Invoice{
-		{ID: uuid.New(), JobID: jobID, State: models.InvoiceStateWaiting},
+	tests := []struct {
+		name                       string
+		req                        *dto.UpdateInvoiceStateRequest
+		mockInvoiceRepoGetByID     mockInvoiceRepoGetByID
+		mockJobRepoGetByID         mockJobRepoGetByID
+		mockInvoiceRepoUpdateState mockInvoiceRepoUpdateState
+		expectedInvoice            *models.Invoice
+		expectedErr                error
+	}{
+		{
+			name: "Success",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{
+				req: &dto.UpdateInvoiceStateRequest{ID: uuid.Nil, NewState: models.InvoiceStateComplete, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateComplete, UpdatedAt: time.Now()}, 
+				err: nil,
+			},
+			expectedInvoice: &models.Invoice{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateComplete, UpdatedAt: time.Now()}, 
+			expectedErr:     nil,
+		},
+		{
+			name: "Error_InvoiceNotFound",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{}, // Not called
+			expectedInvoice:            nil,
+			expectedErr:                services.ErrNotFound,
+		},
+		{
+			name: "Error_InvoiceRepoError_Get",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{}, // Not called
+			expectedInvoice:            nil,
+			expectedErr:                errors.New("internal error getting invoice: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_JobRepoError",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{}, // Not called
+			expectedInvoice:            nil,
+			expectedErr:                errors.New("internal error getting job: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_Forbidden_NotContractor",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()}, // Different user
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.New())}, // Actual contractor
+				err: nil,
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{}, // Not called
+			expectedInvoice:            nil,
+			expectedErr:                services.ErrForbidden,
+		},
+		{
+			name: "Error_InvalidTransition",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateWaiting, UserId: uuid.New()}, // Invalid transition: Complete -> Waiting
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateComplete}, // Current state is Complete
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{}, // Not called
+			expectedInvoice:            nil,
+			expectedErr:                services.ErrInvalidTransition,
+		},
+		{
+			name: "Error_UpdateRepoNotFound",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{
+				req: &dto.UpdateInvoiceStateRequest{ID: uuid.Nil, NewState: models.InvoiceStateComplete, UserId: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound, // Repo returns NotFound on Update
+			},
+			expectedInvoice: nil,
+			expectedErr:     services.ErrNotFound, // Service maps this
+		},
+		{
+			name: "Error_UpdateRepoError",
+			req:  &dto.UpdateInvoiceStateRequest{ID: uuid.New(), NewState: models.InvoiceStateComplete, UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoUpdateState: mockInvoiceRepoUpdateState{
+				req: &dto.UpdateInvoiceStateRequest{ID: uuid.Nil, NewState: models.InvoiceStateComplete, UserId: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db write error"),
+			},
+			expectedInvoice: nil,
+			expectedErr:     errors.New("internal error updating invoice: db write error"), // Service wraps the error
+		},
 	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
-	mockInvoiceRepo.EXPECT().ListByJob(ctx, req).Return(expectedInvoices, nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
+			defer ctrl.Finish()
 
-	invoices, err := invoiceService.ListInvoicesByJob(ctx, req)
+			// Set dynamic UUIDs
+			invoiceID := uuid.New()
+			jobID := uuid.New()
+			contractorID := uuid.New()
+			actualContractorID := uuid.New()
+			requestingUserID := uuid.New()
 
-	require.NoError(t, err)
-	assert.Equal(t, expectedInvoices, invoices)
+			tt.req.ID = invoiceID
+			if tt.name == "Success" || tt.name == "Error_UpdateRepoNotFound" || tt.name == "Error_UpdateRepoError" {
+				tt.req.UserId = contractorID
+			} else if tt.name == "Error_Forbidden_NotContractor" {
+				tt.req.UserId = requestingUserID
+			} else if tt.name == "Error_InvalidTransition" {
+				tt.req.UserId = contractorID // Ensure auth passes for this test
+			} else {
+				tt.req.UserId = uuid.New() // Default for other error cases
+			}
+
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				tt.mockInvoiceRepoGetByID.req.ID = invoiceID
+			}
+			if tt.mockInvoiceRepoGetByID.res != nil {
+				tt.mockInvoiceRepoGetByID.res.ID = invoiceID
+				tt.mockInvoiceRepoGetByID.res.JobID = jobID
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success" || tt.name == "Error_UpdateRepoNotFound" || tt.name == "Error_UpdateRepoError" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Error_Forbidden_NotContractor" {
+					tt.mockJobRepoGetByID.res.ContractorID = &actualContractorID
+				} else if tt.name == "Error_InvalidTransition" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID // Ensure auth passes for this test
+				} else {
+					tt.mockJobRepoGetByID.res.ContractorID = ptrUUID(uuid.New()) // Default for other cases
+				}
+			}
+
+			if tt.mockInvoiceRepoUpdateState.req != nil {
+				tt.mockInvoiceRepoUpdateState.req.ID = invoiceID
+				tt.mockInvoiceRepoUpdateState.req.UserId = tt.req.UserId // Match the request user ID
+			}
+			if tt.mockInvoiceRepoUpdateState.res != nil {
+				tt.mockInvoiceRepoUpdateState.res.ID = invoiceID
+				tt.mockInvoiceRepoUpdateState.res.JobID = jobID
+				// Simulate repo setting time if not already set
+				if tt.mockInvoiceRepoUpdateState.res.UpdatedAt.IsZero() {
+					tt.mockInvoiceRepoUpdateState.res.UpdatedAt = time.Now()
+				}
+			}
+
+			if tt.expectedInvoice != nil {
+				tt.expectedInvoice.ID = invoiceID
+				tt.expectedInvoice.JobID = jobID
+				// Simulate repo setting time if not already set
+				if tt.expectedInvoice.UpdatedAt.IsZero() {
+					tt.expectedInvoice.UpdatedAt = time.Now()
+				}
+			}
+
+			// Setup mocks
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				mockInvoiceRepo.EXPECT().GetByID(ctx, tt.mockInvoiceRepoGetByID.req).Return(tt.mockInvoiceRepoGetByID.res, tt.mockInvoiceRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockInvoiceRepoUpdateState.req != nil {
+				mockInvoiceRepo.EXPECT().UpdateState(ctx, tt.mockInvoiceRepoUpdateState.req).Return(tt.mockInvoiceRepoUpdateState.res, tt.mockInvoiceRepoUpdateState.err).Times(1)
+			}
+
+			// Call the service method
+			invoice, err := invoiceService.UpdateInvoiceState(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, invoice)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, invoice)
+				// Loosely assert time fields
+				assert.WithinDuration(t, tt.expectedInvoice.UpdatedAt, invoice.UpdatedAt, time.Second)
+				// Compare other fields
+				tt.expectedInvoice.UpdatedAt = invoice.UpdatedAt // Set expected to actual for comparison
+				assert.Equal(t, tt.expectedInvoice, invoice)
+			}
+		})
+	}
 }
 
-func TestInvoiceService_ListInvoicesByJob_Error_JobNotFound(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
+func TestInvoiceService_DeleteInvoice(t *testing.T) {
+	type mockInvoiceRepoGetByID struct {
+		req *dto.GetInvoiceByIDRequest
+		res *models.Invoice
+		err error
+	}
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockInvoiceRepoDelete struct {
+		req *dto.DeleteInvoiceRequest
+		err error
+	}
 
-	req := &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()}
+	tests := []struct {
+		name                    string
+		req                     *dto.DeleteInvoiceRequest
+		mockInvoiceRepoGetByID  mockInvoiceRepoGetByID
+		mockJobRepoGetByID      mockJobRepoGetByID
+		mockInvoiceRepoDelete   mockInvoiceRepoDelete
+		expectedErr             error
+	}{
+		{
+			name: "Success",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{
+				req: &dto.DeleteInvoiceRequest{ID: uuid.Nil}, 
+				err: nil,
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "Error_InvoiceNotFound",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{}, // Not called
+			expectedErr: services.ErrNotFound,
+		},
+		{
+			name: "Error_InvoiceRepoError_Get",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{}, // Not called
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{}, // Not called
+			expectedErr: errors.New("internal error getting invoice: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_JobRepoError",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{}, // Not called
+			expectedErr: errors.New("internal error getting job: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_Forbidden_NotContractor",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()}, // Different user
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.New())}, // Actual contractor
+				err: nil,
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{}, // Not called
+			expectedErr: services.ErrForbidden,
+		},
+		{
+			name: "Error_InvalidState_NotWaiting",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateComplete}, // Wrong state
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{}, // Not called
+			expectedErr: services.ErrInvalidState,
+		},
+		{
+			name: "Error_DeleteRepoNotFound",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{
+				req: &dto.DeleteInvoiceRequest{ID: uuid.Nil}, 
+				err: storage.ErrNotFound, // Repo returns NotFound on Delete
+			},
+			expectedErr: services.ErrNotFound, // Service maps this
+		},
+		{
+			name: "Error_DeleteRepoError",
+			req:  &dto.DeleteInvoiceRequest{ID: uuid.New(), UserId: uuid.New()},
+			mockInvoiceRepoGetByID: mockInvoiceRepoGetByID{
+				req: &dto.GetInvoiceByIDRequest{ID: uuid.Nil, UserId: uuid.Nil}, 
+				res: &models.Invoice{ID: uuid.Nil, JobID: uuid.New(), State: models.InvoiceStateWaiting}, 
+				err: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoDelete: mockInvoiceRepoDelete{
+				req: &dto.DeleteInvoiceRequest{ID: uuid.Nil}, 
+				err: errors.New("db delete error"),
+			},
+			expectedErr: errors.New("internal error deleting invoice: db delete error"), // Service wraps the error
+		},
+	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: req.JobID}).Return(nil, storage.ErrNotFound).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
+			defer ctrl.Finish()
 
-	_, err := invoiceService.ListInvoicesByJob(ctx, req)
+			// Set dynamic UUIDs
+			invoiceID := uuid.New()
+			jobID := uuid.New()
+			contractorID := uuid.New()
+			actualContractorID := uuid.New()
+			requestingUserID := uuid.New()
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
+			tt.req.ID = invoiceID
+			if tt.name == "Success" || tt.name == "Error_DeleteRepoNotFound" || tt.name == "Error_DeleteRepoError" {
+				tt.req.UserId = contractorID
+			} else if tt.name == "Error_Forbidden_NotContractor" {
+				tt.req.UserId = requestingUserID
+			} else if tt.name == "Error_InvalidState_NotWaiting" {
+				tt.req.UserId = contractorID // Ensure auth passes for this test
+			} else {
+				tt.req.UserId = uuid.New() // Default for other error cases
+			}
+
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				tt.mockInvoiceRepoGetByID.req.ID = invoiceID
+			}
+			if tt.mockInvoiceRepoGetByID.res != nil {
+				tt.mockInvoiceRepoGetByID.res.ID = invoiceID
+				tt.mockInvoiceRepoGetByID.res.JobID = jobID
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success" || tt.name == "Error_DeleteRepoNotFound" || tt.name == "Error_DeleteRepoError" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Error_Forbidden_NotContractor" {
+					tt.mockJobRepoGetByID.res.ContractorID = &actualContractorID
+				} else if tt.name == "Error_InvalidState_NotWaiting" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID // Ensure auth passes for this test
+				} else {
+					tt.mockJobRepoGetByID.res.ContractorID = ptrUUID(uuid.New()) // Default for other cases
+				}
+			}
+
+			if tt.mockInvoiceRepoDelete.req != nil {
+				tt.mockInvoiceRepoDelete.req.ID = invoiceID
+				// UserId is not part of the DeleteInvoiceRequest for the repo
+			}
+
+			// Setup mocks
+			if tt.mockInvoiceRepoGetByID.req != nil {
+				mockInvoiceRepo.EXPECT().GetByID(ctx, tt.mockInvoiceRepoGetByID.req).Return(tt.mockInvoiceRepoGetByID.res, tt.mockInvoiceRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockInvoiceRepoDelete.req != nil || tt.mockInvoiceRepoDelete.err != nil {
+				mockInvoiceRepo.EXPECT().Delete(ctx, gomock.Any()).Return(tt.mockInvoiceRepoDelete.err).Times(1)
+			}
+
+			// Call the service method
+			err := invoiceService.DeleteInvoice(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
-func TestInvoiceService_ListInvoicesByJob_Error_JobRepoError(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
+func TestInvoiceService_ListInvoicesByJob(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockInvoiceRepoListByJob struct {
+		req *dto.ListInvoicesByJobRequest
+		res []models.Invoice
+		err error
+	}
 
-	req := &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()}
-	repoErr := errors.New("db error")
+	tests := []struct {
+		name                       string
+		req                        *dto.ListInvoicesByJobRequest
+		mockJobRepoGetByID         mockJobRepoGetByID
+		mockInvoiceRepoListByJob   mockInvoiceRepoListByJob
+		expectedInvoices           []models.Invoice
+		expectedErr                error
+	}{
+		{
+			name: "Success_AsEmployer",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New(), Limit: 5, Offset: 0},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.Nil, ContractorID: ptrUUID(uuid.New())}, 
+				err: nil,
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{
+				req: &dto.ListInvoicesByJobRequest{JobID: uuid.Nil, UserId: uuid.Nil, Limit: 5, Offset: 0}, 
+				res: []models.Invoice{
+					{ID: uuid.New(), JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+					{ID: uuid.New(), JobID: uuid.Nil, State: models.InvoiceStateComplete}, 
+				},
+				err: nil,
+			},
+			expectedInvoices: []models.Invoice{
+				{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+				{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateComplete}, 
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "Success_AsContractor",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New(), Limit: 5, Offset: 0}, // User is contractor
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), ContractorID: ptrUUID(uuid.Nil)}, 
+				err: nil,
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{
+				req: &dto.ListInvoicesByJobRequest{JobID: uuid.Nil, UserId: uuid.Nil, Limit: 5, Offset: 0}, 
+				res: []models.Invoice{
+					{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+				},
+				err: nil,
+			},
+			expectedInvoices: []models.Invoice{
+				{ID: uuid.Nil, JobID: uuid.Nil, State: models.InvoiceStateWaiting}, 
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "Error_JobNotFound",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{}, // Not called
+			expectedInvoices:         nil,
+			expectedErr:              services.ErrNotFound,
+		},
+		{
+			name: "Error_JobRepoError",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db error"),
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{}, // Not called
+			expectedInvoices:         nil,
+			expectedErr:              errors.New("internal error getting job: db error"), // Service wraps the error
+		},
+		{
+			name: "Error_Forbidden",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()}, // User not associated
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), ContractorID: ptrUUID(uuid.New())}, 
+				err: nil,
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{}, // Not called
+			expectedInvoices:         nil,
+			expectedErr:              services.ErrForbidden,
+		},
+		{
+			name: "Error_ListRepoError",
+			req:  &dto.ListInvoicesByJobRequest{JobID: uuid.New(), UserId: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.Nil}, 
+				err: nil,
+			},
+			mockInvoiceRepoListByJob: mockInvoiceRepoListByJob{
+				req: &dto.ListInvoicesByJobRequest{JobID: uuid.Nil, UserId: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db list error"),
+			},
+			expectedInvoices: nil,
+			expectedErr:     errors.New("internal error listing invoices: db list error"), // Service wraps the error
+		},
+	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: req.JobID}).Return(nil, repoErr).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
+			defer ctrl.Finish()
 
-	_, err := invoiceService.ListInvoicesByJob(ctx, req)
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			contractorID := uuid.New()
+			otherUserID := uuid.New()
+			invoiceID := uuid.New()
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting job")
-	assert.True(t, errors.Is(err, repoErr))
-}
+			tt.req.JobID = jobID
+			if tt.name == "Success_AsEmployer" || tt.name == "Error_ListRepoError" {
+				tt.req.UserId = employerID
+			} else if tt.name == "Success_AsContractor" {
+				tt.req.UserId = contractorID
+			} else if tt.name == "Error_Forbidden" {
+				tt.req.UserId = otherUserID
+			} else {
+				tt.req.UserId = uuid.New() // Default for other error cases
+			}
 
-func TestInvoiceService_ListInvoicesByJob_Error_Forbidden(t *testing.T) {
-	ctx, invoiceService, _, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success_AsEmployer" || tt.name == "Error_ListRepoError" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Success_AsContractor" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Error_Forbidden" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Default for other cases
+					tt.mockJobRepoGetByID.res.ContractorID = ptrUUID(uuid.New()) // Default for other cases
+				}
+			}
 
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	otherUserID := uuid.New() // User not associated
-	req := &dto.ListInvoicesByJobRequest{JobID: jobID, UserId: otherUserID}
+			if tt.mockInvoiceRepoListByJob.req != nil {
+				tt.mockInvoiceRepoListByJob.req.JobID = jobID
+				tt.mockInvoiceRepoListByJob.req.UserId = tt.req.UserId // Match the request user ID
+			}
+			for i := range tt.mockInvoiceRepoListByJob.res {
+				tt.mockInvoiceRepoListByJob.res[i].JobID = jobID
+				tt.mockInvoiceRepoListByJob.res[i].ID = invoiceID
+			}
+			for i := range tt.expectedInvoices {
+				tt.expectedInvoices[i].JobID = jobID
+				tt.expectedInvoices[i].ID = invoiceID
+			}
 
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID, ContractorID: &contractorID}
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockInvoiceRepoListByJob.req != nil {
+				mockInvoiceRepo.EXPECT().ListByJob(ctx, tt.mockInvoiceRepoListByJob.req).Return(tt.mockInvoiceRepoListByJob.res, tt.mockInvoiceRepoListByJob.err).Times(1)
+			}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil).Times(1)
+			// Call the service method
+			invoices, err := invoiceService.ListInvoicesByJob(ctx, tt.req)
 
-	_, err := invoiceService.ListInvoicesByJob(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestInvoiceService_ListInvoicesByJob_Error_ListRepoError(t *testing.T) {
-	ctx, invoiceService, mockInvoiceRepo, mockJobRepo, ctrl := setupInvoiceServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.ListInvoicesByJobRequest{JobID: jobID, UserId: employerID}
-	repoErr := errors.New("db list error")
-
-	mockJob := &models.Job{ID: jobID, EmployerID: employerID}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(mockJob, nil)
-	mockInvoiceRepo.EXPECT().ListByJob(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := invoiceService.ListInvoicesByJob(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error listing invoices")
-	assert.True(t, errors.Is(err, repoErr))
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, invoices)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedInvoices, invoices)
+			}
+		})
+	}
 }

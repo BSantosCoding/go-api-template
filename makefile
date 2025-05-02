@@ -56,7 +56,7 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 
 test: ## Run all Go unit and integration tests
 	@echo "Running Go tests..."
-	@go test -v ./... # Runs tests in current dir and all subdirs recursively
+	@go test ./... # Runs tests in current dir and all subdirs recursively
 
 
 # --- Migration Commands ---
