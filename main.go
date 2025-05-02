@@ -53,6 +53,10 @@ func main() {
 	}
 	defer dbPool.Close()
 
+	userRepo := postgres.NewUserRepo(dbPool)
+	jobRepo := postgres.NewJobRepo(dbPool)
+	invoiceRepo := postgres.NewInvoiceRepo(dbPool)
+
 	// --- Initialize Blockchain Event Listener ---
 	var eventListener *blockchain.EventListener
 	if cfg.Blockchain.RPCURL != "" && cfg.Blockchain.ContractAddress != "" && cfg.Blockchain.ContractABIPath != "" {
@@ -68,10 +72,6 @@ func main() {
 		log.Println("Blockchain listener configuration missing (RPC URL, Address, or ABI Path), skipping initialization.")
 	}
 
-	userRepo := postgres.NewUserRepo(dbPool)
-	jobRepo := postgres.NewJobRepo(dbPool)
-	invoiceRepo := postgres.NewInvoiceRepo(dbPool)
-
 	validate := validator.New()
 
 	application := &app.Application{
@@ -84,6 +84,7 @@ func main() {
 	}
 
 	srv := server.NewServer(application)
+
 	// --- Graceful Shutdown Handling ---
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -101,6 +102,8 @@ func main() {
 	if eventListener != nil {
 		eventListener.Stop()
 	}
+
+	//Gin shutdowns on its own
 
 	log.Println("Application gracefully stopped.")
 }
