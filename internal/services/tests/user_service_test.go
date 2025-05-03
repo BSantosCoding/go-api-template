@@ -12,10 +12,10 @@ import (
 	"go-api-template/internal/storage"
 	"go-api-template/internal/transport/dto"
 
-	"github.com/go-redis/redismock/v9" // Re-import redismock
+	"github.com/go-redis/redismock/v9"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9" // Import redis for redis.Nil
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -167,10 +167,6 @@ func TestUserService_Login(t *testing.T) {
 					Name:         "Test User",
 				}
 				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(mockReturnUser, nil).Times(1)
-				// Expect Redis Set for refresh token
-				// Expectation will be set inside t.Run using redismock.Regexp()
-
-
 			},
 			expectedUser: &models.User{
 				ID: testUserID,
@@ -338,7 +334,6 @@ func TestUserService_Refresh(t *testing.T) {
 				key := services.RedisRefreshTokenPrefix + token
 				mockRedis.ExpectGet(key).SetVal(testUserID.String())
 				mockRedis.ExpectDel(key).SetErr(redisErrGeneric)
-				// Still expect Set for the new token
 				mockRedis.Regexp().ExpectSet(services.RedisRefreshTokenPrefix+".*", testUserID.String(), refreshTokenDuration).SetVal("OK")
 			},
 			expectNewAccessToken: true, // Should still issue new tokens
@@ -531,7 +526,7 @@ func TestUserService_Logout(t *testing.T) {
 			mockSetup: func(mockRedis redismock.ClientMock, token string) {
 				key := services.RedisRefreshTokenPrefix + token
 				mockRedis.ExpectDel(key).SetErr(redisErrGeneric) // Simulate Redis error
-			}, // Simulate Redis error
+			},
 			expectedError: redisErrGeneric,
 			errorContains: "failed to invalidate session",
 		},
