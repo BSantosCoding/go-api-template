@@ -35,7 +35,6 @@ air_build.log
 .env
 
 # --- Optional Local Configuration Overrides ---
-# Uncomment if you use a specific file for local config overrides
 # config.local.yaml
 
 # --- OS Generated Files ---

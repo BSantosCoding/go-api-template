@@ -24,6 +24,7 @@ func RegisterUserRoutes(rg *gin.RouterGroup, userHandler handlers.UserHandlerInt
 	{
 		auth.POST("/register", userHandler.Register) // Route for user registration
 		auth.POST("/login", userHandler.Login)       // Route for user login
-		// Add other auth routes here later (e.g., refresh token, password reset)
+		auth.POST("/refresh", userHandler.Refresh) // Add refresh route
+		auth.POST("/logout", userHandler.Logout)
 	}
 }

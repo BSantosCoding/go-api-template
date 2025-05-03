@@ -22,7 +22,6 @@ const (
 func (js *JobState) Scan(value interface{}) error {
 	strVal, ok := value.(string)
 	if !ok {
-		// Also handle []byte if your driver returns that for VARCHAR
 		byteVal, ok := value.([]byte)
 		if ok {
 			strVal = string(byteVal)

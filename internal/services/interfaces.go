@@ -11,12 +11,14 @@ import (
 // UserService defines the interface for user-related business logic.
 type UserService interface {
 	Register(ctx context.Context, req *dto.CreateUserRequest) (*models.User, error)
-	Login(ctx context.Context, req *dto.LoginRequest) (*models.User, string, error) // Returns user and token
+	Login(ctx context.Context, req *dto.LoginRequest) (*models.User, string, string, error) // Returns user and token
 	GetAll(ctx context.Context) ([]models.User, error)
 	GetByID(ctx context.Context, req *dto.GetUserByIdRequest) (*models.User, error)
 	GetByEmail(ctx context.Context, req *dto.GetUserByEmailRequest) (*models.User, error)
 	Update(ctx context.Context, req *dto.UpdateUserRequest) (*models.User, error)
 	Delete(ctx context.Context, req *dto.DeleteUserRequest) error
+	Refresh(ctx context.Context, req *dto.RefreshRequest) (string, string, error)
+	Logout(ctx context.Context, req *dto.LogoutRequest) error
 }
 
 // JobService defines the interface for job-related business logic.

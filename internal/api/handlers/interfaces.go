@@ -10,6 +10,8 @@ type UserHandlerInterface interface {
 	Register(c *gin.Context)
 	UpdateUser(c *gin.Context)
 	DeleteUser(c *gin.Context)
+	Refresh(c *gin.Context)
+	Logout(c *gin.Context)
 }
 
 // JobHandlerInterface defines the methods needed by the job routes.

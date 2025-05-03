@@ -171,7 +171,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, tokenString, err := h.service.Login(c.Request.Context(), &req)
+	user, accessToken, refreshToken, err := h.service.Login(c.Request.Context(), &req)
 	if err != nil {
 		if errors.Is(err, services.ErrInvalidCredentials) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
@@ -184,12 +184,80 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	userResponse := MapUserModelToUserResponse(user)
 	loginResponse := dto.LoginResponse{
-		User:  userResponse,
-		Token: tokenString,
+		User:         userResponse,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
 	}
 
 	log.Printf("User logged in successfully: %s", user.Email)
 	c.JSON(http.StatusOK, loginResponse)
+}
+
+// Refresh godoc
+// @Summary      Refresh access token
+// @Description  Provides a new access token and refresh token using a valid refresh token.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        refreshRequest body      dto.RefreshRequest true  "Refresh token"
+// @Success      200  {object}  dto.LoginResponse "Token refreshed successfully" // Reusing LoginResponse structure
+// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input"
+// @Failure      401  {object}  map[string]string{error=string} "Unauthorized - Invalid or expired refresh token"
+// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
+// @Router       /auth/refresh [post]
+func (h *UserHandler) Refresh(c *gin.Context) {
+	var req dto.RefreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	newAccessToken, newRefreshToken, err := h.service.Refresh(c.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidCredentials) { // Reuse error for invalid/expired refresh token
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
+		} else {
+			log.Printf("Error refreshing token: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to refresh token"})
+		}
+		return
+	}
+
+	refreshResponse := gin.H{
+		"accessToken":  newAccessToken,
+		"refreshToken": newRefreshToken,
+	}
+
+	log.Println("Token refreshed successfully")
+	c.JSON(http.StatusOK, refreshResponse) // Consider a dedicated RefreshResponse DTO later
+}
+
+// Logout godoc
+// @Summary      Log out user
+// @Description  Invalidates the user's refresh token.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        refreshRequest body      dto.RefreshRequest true  "Refresh token to invalidate" // Reusing RefreshRequest DTO
+// @Success      204  {object}  nil "Logout successful"
+// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input"
+// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
+// @Router       /auth/logout [post]
+func (h *UserHandler) Logout(c *gin.Context) {
+	var req dto.LogoutRequest // Reuse RefreshRequest to get the token
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	if err := h.service.Logout(c.Request.Context(), &req); err != nil {
+		log.Printf("Error during logout for token %s: %v", req.RefreshToken, err)
+	}
+
+	log.Printf("Logout successful for token: %s", req.RefreshToken)
+	c.Status(http.StatusNoContent)
 }
 
 // UpdateUser godoc
@@ -314,4 +382,3 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 
 	c.Status(http.StatusNoContent) // Standard response for successful DELETE
 }
-

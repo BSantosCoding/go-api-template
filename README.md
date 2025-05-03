@@ -71,6 +71,15 @@ The following Go tools are used, but the Makefile can install them for you:
     BLOCKCHAIN_RPC_URL="wss://ethereum-sepolia-rpc.publicnode.com"
     CONTRACT_ADDRESS="0x694AA1769357215DE4FAC081bf1f309aDC325306" # Chainlink ETH/USD on Sepolia
     CONTRACT_ABI_PATH="config/abi/AggregatorV3Interface.abi.json" # Relative path to ABI file
+
+    JWT_SECRET=secret-here
+    JWT_EXPIRATION_MINUTES=120
+    JWT_REFRESH_EXPIRATION=24
+
+    # --- Redis ---
+    REDIS_ADDR=localhost:6379
+    REDIS_PASSWORD=pwd-here
+    REDIS_DB=0
     EOF
     ```
 

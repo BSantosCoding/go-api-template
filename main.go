@@ -47,6 +47,13 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// --- Initialize Redis Client ---
+	redisClient, err := database.NewRedisClient(cfg.Redis)
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redisClient.Close()
+
 	dbPool, err := database.NewConnectionPool(cfg.DB)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -77,6 +84,7 @@ func main() {
 	application := &app.Application{
 		Config:   cfg,
 		DBPool:   dbPool,
+		RedisClient: redisClient,
 		UserRepo: userRepo,
 		JobRepo: jobRepo,
 		InvoiceRepo: invoiceRepo,
