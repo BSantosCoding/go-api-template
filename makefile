@@ -56,7 +56,10 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 
 test: ## Run all Go unit and integration tests
 	@echo "Running Go tests..."
-	@go test -v ./... # Runs tests in current dir and all subdirs recursively
+	@go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
+	@echo "Generating HTML coverage report..."
+	@go tool cover -html=coverage.out -o coverage.html
+
 
 
 # --- Migration Commands ---

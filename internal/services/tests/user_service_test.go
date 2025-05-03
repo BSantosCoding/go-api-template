@@ -12,16 +12,19 @@ import (
 	"go-api-template/internal/storage"
 	"go-api-template/internal/transport/dto"
 
+	"github.com/go-redis/redismock/v9"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	jwtSecret   = "test-secret-key"
-	jwtDuration = 15 * time.Minute
+	jwtSecret              = "test-secret-key"
+	jwtDuration            = 15 * time.Minute
+	refreshTokenDuration   = 72 * time.Hour
 )
 
 var (
@@ -36,7 +39,8 @@ func TestUserService_Register(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client as it's not used in Register
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 
 	repoErrDbConnectionLost := errors.New("database connection lost")
 
@@ -44,7 +48,7 @@ func TestUserService_Register(t *testing.T) {
 		name          string
 		req           *dto.CreateUserRequest
 		mockSetup     func(repo *mock_storage.MockUserRepository, req *dto.CreateUserRequest)
-		expectedUser  *models.User // Only compare relevant fields
+		expectedUser  *models.User
 		expectedError error
 		errorContains string
 	}{
@@ -70,7 +74,7 @@ func TestUserService_Register(t *testing.T) {
 				ID:    testUserID,
 				Email: "test@example.com",
 				Name:  "Test User",
-				// PasswordHash is not returned by the service
+				// PasswordHash is not returned by the service on Register
 			},
 			expectedError: nil,
 		},
@@ -98,7 +102,7 @@ func TestUserService_Register(t *testing.T) {
 				repo.EXPECT().Create(gomock.Any(), req).Return(nil, repoErrDbConnectionLost).Times(1)
 			},
 			expectedUser:  nil,
-			expectedError: repoErrDbConnectionLost, // Check for wrapped error
+			expectedError: repoErrDbConnectionLost,
 			errorContains: "internal error creating user",
 		},
 	}
@@ -122,7 +126,7 @@ func TestUserService_Register(t *testing.T) {
 				assert.Equal(t, tt.expectedUser.ID, user.ID)
 				assert.Equal(t, tt.expectedUser.Email, user.Email)
 				assert.Equal(t, tt.expectedUser.Name, user.Name)
-				// Don't assert PasswordHash as it's not returned
+				// Don't assert PasswordHash as it's not returned by Register
 			}
 		})
 	}
@@ -133,7 +137,6 @@ func TestUserService_Login(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
 	ctx := context.Background()
 
 	correctPassword := "password123"
@@ -144,7 +147,8 @@ func TestUserService_Login(t *testing.T) {
 		name          string
 		req           *dto.LoginRequest
 		mockSetup     func(repo *mock_storage.MockUserRepository, req *dto.LoginRequest)
-		expectedUser  *models.User // Only compare relevant fields
+		expectedUser  *models.User
+		expectRefreshToken bool
 		expectToken   bool
 		expectedError error
 		errorContains string
@@ -165,11 +169,12 @@ func TestUserService_Login(t *testing.T) {
 				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(mockReturnUser, nil).Times(1)
 			},
 			expectedUser: &models.User{
-				ID:    testUserID,
+				ID: testUserID,
 				Email: "test@example.com",
 				Name:  "Test User",
 			},
 			expectToken:   true,
+			expectRefreshToken: true,
 			expectedError: nil,
 		},
 		{
@@ -182,13 +187,14 @@ func TestUserService_Login(t *testing.T) {
 				mockReturnUser := &models.User{
 					ID:           testUserID,
 					Email:        req.Email,
-					PasswordHash: string(correctHashedPassword), // Correct hash in DB
+					PasswordHash: string(correctHashedPassword),
 					Name:         "Test User",
 				}
 				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(mockReturnUser, nil).Times(1)
 			},
 			expectedUser:  nil,
 			expectToken:   false,
+			expectRefreshToken: false,
 			expectedError: services.ErrInvalidCredentials,
 		},
 		{
@@ -198,10 +204,11 @@ func TestUserService_Login(t *testing.T) {
 				Password: "password123",
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.LoginRequest) {
-				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(nil, services.ErrInvalidCredentials).Times(1)
+				repo.EXPECT().GetByEmail(gomock.Any(), &dto.GetUserByEmailRequest{Email: req.Email}).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectToken:   false,
+			expectRefreshToken: false,
 			expectedError: services.ErrInvalidCredentials,
 		},
 		{
@@ -215,16 +222,23 @@ func TestUserService_Login(t *testing.T) {
 			},
 			expectedUser:  nil,
 			expectToken:   false,
-			expectedError: repoErrDbConnection, // Check for wrapped error
+			expectRefreshToken: false,
+			expectedError: repoErrDbConnection,
 			errorContains: "internal error during login",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.mockSetup(mockUserRepo, tt.req)
+			// Provide a mock Redis client to prevent nil pointer dereference in Login
+			mockRedisClient, mockRedis := redismock.NewClientMock()
+			userService := services.NewUserService(mockUserRepo, mockRedisClient, jwtSecret, jwtDuration, refreshTokenDuration)
 
-			user, token, err := userService.Login(ctx, tt.req)
+			tt.mockSetup(mockUserRepo, tt.req)
+			if tt.name == "Success" {
+				mockRedis.Regexp().ExpectSet(services.RedisRefreshTokenPrefix+".*", testUserID.String(), refreshTokenDuration).SetVal("OK") // Use redismock.Regexp() as argument
+			}
+			user, accessToken, refreshToken, err := userService.Login(ctx, tt.req)
 
 			if tt.expectedError != nil {
 				require.Error(t, err)
@@ -233,7 +247,8 @@ func TestUserService_Login(t *testing.T) {
 					assert.Contains(t, err.Error(), tt.errorContains)
 				}
 				assert.Nil(t, user)
-				assert.Empty(t, token)
+				assert.Empty(t, accessToken)
+				assert.Empty(t, refreshToken)
 			} else {
 				require.NoError(t, err)
 				assert.NotNil(t, user)
@@ -241,11 +256,141 @@ func TestUserService_Login(t *testing.T) {
 				assert.Equal(t, tt.expectedUser.Email, user.Email)
 				assert.Equal(t, tt.expectedUser.Name, user.Name)
 				if tt.expectToken {
-					assert.NotEmpty(t, token)
+					assert.NotEmpty(t, accessToken)
 				} else {
-					assert.Empty(t, token)
+					assert.Empty(t, accessToken)
+				}
+				if tt.expectRefreshToken {
+					assert.NotEmpty(t, refreshToken)
+				} else {
+					assert.Empty(t, refreshToken)
 				}
 			}
+			// Verify all Redis expectations were met
+			assert.NoError(t, mockRedis.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestUserService_Refresh(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockUserRepo := mock_storage.NewMockUserRepository(ctrl) // Not used directly but needed for NewUserService
+
+	validRefreshToken := "valid-refresh-token"
+	redisErrGeneric := errors.New("redis connection error")
+
+	tests := []struct {
+		name                 string
+		refreshToken         string
+		mockSetup            func(mockRedis redismock.ClientMock, token string)
+		expectNewAccessToken bool
+		expectNewRefreshToken bool
+		expectedError        error
+		errorContains        string
+	}{
+		{
+			name:         "Success",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectGet(key).SetVal(testUserID.String())
+				mockRedis.ExpectDel(key).SetVal(1)
+				// Expect Set for the new token
+				mockRedis.Regexp().ExpectSet(services.RedisRefreshTokenPrefix+".*", testUserID.String(), refreshTokenDuration).SetVal("OK")
+			},
+			expectNewAccessToken: true,
+			expectNewRefreshToken: true,
+			expectedError:        nil,
+		},
+		{
+			name:         "Refresh Token Not Found",
+			refreshToken: "invalid-token",
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectGet(key).SetErr(redis.Nil) // Simulate token not found
+			},
+			expectNewAccessToken: false,
+			expectNewRefreshToken: false,
+			expectedError:        services.ErrInvalidCredentials,
+		},
+		{
+			name:         "Redis Error on Get",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectGet(key).SetErr(redisErrGeneric)
+			},
+			expectNewAccessToken: false,
+			expectNewRefreshToken: false,
+			expectedError:        redisErrGeneric,
+			errorContains:        "internal error validating refresh token",
+		},
+		{
+			name:         "Redis Error on Del (should still proceed)",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectGet(key).SetVal(testUserID.String())
+				mockRedis.ExpectDel(key).SetErr(redisErrGeneric)
+				mockRedis.Regexp().ExpectSet(services.RedisRefreshTokenPrefix+".*", testUserID.String(), refreshTokenDuration).SetVal("OK")
+			},
+			expectNewAccessToken: true, // Should still issue new tokens
+			expectNewRefreshToken: true,
+			expectedError:        nil, // No error returned to caller in this case
+		},
+		{
+			name:         "Redis Error on Set New Token",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectGet(key).SetVal(testUserID.String())
+				mockRedis.ExpectDel(key).SetVal(1)
+				// Expect Set for the new token to fail
+				mockRedis.Regexp().ExpectSet(services.RedisRefreshTokenPrefix+".*", testUserID.String(), refreshTokenDuration).SetErr(redisErrGeneric)
+			},
+			expectNewAccessToken: false,
+			expectNewRefreshToken: false, // Fails because storing new refresh token failed
+			expectedError:        redisErrGeneric,
+			errorContains:        "failed to handle new refresh token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRedisClient, mockRedis := redismock.NewClientMock()
+			userService := services.NewUserService(mockUserRepo, mockRedisClient, jwtSecret, jwtDuration, refreshTokenDuration)
+
+			tt.mockSetup(mockRedis, tt.refreshToken)
+			ctx := context.Background()
+
+			refreshReq := &dto.RefreshRequest{RefreshToken: tt.refreshToken}
+			newAccessToken, newRefreshToken, err := userService.Refresh(ctx, refreshReq)
+
+			if tt.expectedError != nil {
+				require.Error(t, err)
+				assert.True(t, errors.Is(err, tt.expectedError) || err.Error() == tt.expectedError.Error(), "Expected error %v or similar, got %v", tt.expectedError, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+				assert.Empty(t, newAccessToken)
+				assert.Empty(t, newRefreshToken)
+			} else {
+				require.NoError(t, err)
+				if tt.expectNewAccessToken {
+					assert.NotEmpty(t, newAccessToken)
+				} else {
+					assert.Empty(t, newAccessToken)
+				}
+				if tt.expectNewRefreshToken {
+					assert.NotEmpty(t, newRefreshToken)
+				} else {
+					assert.Empty(t, newRefreshToken)
+				}
+			}
+			// Verify all Redis expectations were met
+			assert.NoError(t, mockRedis.ExpectationsWereMet())
 		})
 	}
 }
@@ -255,7 +400,8 @@ func TestUserService_Update(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 	ctx := context.Background()
 
 	repoErrDbWriteFailed := errors.New("db write failed")
@@ -264,7 +410,7 @@ func TestUserService_Update(t *testing.T) {
 		name          string
 		req           *dto.UpdateUserRequest
 		mockSetup     func(repo *mock_storage.MockUserRepository, req *dto.UpdateUserRequest)
-		expectedUser  *models.User // Only compare relevant fields
+		expectedUser  *models.User
 		expectedError error
 		errorContains string
 	}{
@@ -278,7 +424,7 @@ func TestUserService_Update(t *testing.T) {
 				mockReturnUser := &models.User{
 					ID:        req.ID,
 					Name:      *req.Name,
-					Email:     "original@example.com", // Email shouldn't change here
+					Email:     "original@example.com", // Email shouldn't change in this specific test case
 					UpdatedAt: time.Now(),
 				}
 				repo.EXPECT().Update(gomock.Any(), req).Return(mockReturnUser, nil).Times(1)
@@ -293,15 +439,14 @@ func TestUserService_Update(t *testing.T) {
 		{
 			name: "Not Found",
 			req: &dto.UpdateUserRequest{
-				ID:   uuid.New(), // Different ID
+				ID:   uuid.New(),
 				Name: ptr("Updated Name"),
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.UpdateUserRequest) {
 				repo.EXPECT().Update(gomock.Any(), req).Return(nil, services.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
-			expectedError: services.ErrNotFound, // Service currently passes through
-			// If service mapped: expectedError: services.ErrNotFound,
+			expectedError: services.ErrNotFound,
 		},
 		{
 			name: "Repository Error",
@@ -313,9 +458,8 @@ func TestUserService_Update(t *testing.T) {
 				repo.EXPECT().Update(gomock.Any(), req).Return(nil, repoErrDbWriteFailed).Times(1)
 			},
 			expectedUser:  nil,
-			expectedError: repoErrDbWriteFailed, // Service currently passes through
+			expectedError: repoErrDbWriteFailed,
 		},
-		// Add TestUserService_Update_Forbidden here if/when authorization is added
 	}
 
 	for _, tt := range tests {
@@ -336,8 +480,70 @@ func TestUserService_Update(t *testing.T) {
 				assert.NotNil(t, user)
 				assert.Equal(t, tt.expectedUser.ID, user.ID)
 				assert.Equal(t, tt.expectedUser.Name, user.Name)
-				assert.Equal(t, tt.expectedUser.Email, user.Email) // Ensure other fields are present
+				assert.Equal(t, tt.expectedUser.Email, user.Email)
 			}
+		})
+	}
+}
+
+func TestUserService_Logout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
+
+	validRefreshToken := "valid-refresh-token-to-logout"
+	redisErrGeneric := errors.New("redis connection error during logout")
+
+	tests := []struct {
+		name          string
+		refreshToken  string
+		mockSetup     func(mockRedis redismock.ClientMock, token string)
+		expectedError error
+		errorContains string
+	}{
+		{
+			name:         "Success",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectDel(key).SetVal(1)
+			},
+			expectedError: nil,
+		},
+		{
+			name:         "Token Not Found (Still Success)",
+			refreshToken: "already-logged-out-token",
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectDel(key).SetErr(redis.Nil)
+			},
+			expectedError: nil, // Logout succeeds even if token is already gone
+		},
+		{
+			name:         "Redis Error on Del",
+			refreshToken: validRefreshToken,
+			mockSetup: func(mockRedis redismock.ClientMock, token string) {
+				key := services.RedisRefreshTokenPrefix + token
+				mockRedis.ExpectDel(key).SetErr(redisErrGeneric) // Simulate Redis error
+			},
+			expectedError: redisErrGeneric,
+			errorContains: "failed to invalidate session",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRedisClient, mockRedis := redismock.NewClientMock()
+			userService := services.NewUserService(mockUserRepo, mockRedisClient, jwtSecret, jwtDuration, refreshTokenDuration)
+			tt.mockSetup(mockRedis, tt.refreshToken)
+			ctx := context.Background()
+
+			logoutReq := &dto.LogoutRequest{RefreshToken: tt.refreshToken}
+			err := userService.Logout(ctx, logoutReq)
+
+			assert.True(t, errors.Is(err, tt.expectedError) || (err != nil && tt.expectedError != nil && err.Error() == tt.expectedError.Error()), "Expected error %v or similar, got %v", tt.expectedError, err)
+			assert.NoError(t, mockRedis.ExpectationsWereMet())
 		})
 	}
 }
@@ -347,7 +553,8 @@ func TestUserService_Delete(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 	ctx := context.Background()
 
 	repoErrDbConstraintViolation := errors.New("db constraint violation")
@@ -372,7 +579,7 @@ func TestUserService_Delete(t *testing.T) {
 		{
 			name: "Not Found",
 			req: &dto.DeleteUserRequest{
-				ID: uuid.New(), // Different ID
+				ID: uuid.New(),
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.DeleteUserRequest) {
 				repo.EXPECT().Delete(gomock.Any(), req).Return(services.ErrNotFound).Times(1)
@@ -387,7 +594,7 @@ func TestUserService_Delete(t *testing.T) {
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.DeleteUserRequest) {
 				repo.EXPECT().Delete(gomock.Any(), req).Return(repoErrDbConstraintViolation).Times(1)
 			},
-			expectedError: repoErrDbConstraintViolation, 
+			expectedError: repoErrDbConstraintViolation,
 		},
 	}
 
@@ -415,7 +622,8 @@ func TestUserService_GetAll(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 	ctx := context.Background()
 
 	repoErrDbReadError := errors.New("db read error")
@@ -449,7 +657,7 @@ func TestUserService_GetAll(t *testing.T) {
 				repo.EXPECT().GetAll(gomock.Any()).Return(nil, repoErrDbReadError).Times(1)
 			},
 			expectedUsers: nil,
-			expectedError: repoErrDbReadError, // Service currently passes through
+			expectedError: repoErrDbReadError,
 		},
 	}
 
@@ -479,7 +687,8 @@ func TestUserService_GetByID(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 	ctx := context.Background()
 
 	repoErrDbConnectionFailed := errors.New("db connection failed")
@@ -515,10 +724,10 @@ func TestUserService_GetByID(t *testing.T) {
 		{
 			name: "Not Found",
 			req: &dto.GetUserByIdRequest{
-				ID: uuid.New(), // Different ID
+				ID: uuid.New(),
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.GetUserByIdRequest) {
-				repo.EXPECT().GetByID(gomock.Any(), req).Return(nil, services.ErrNotFound).Times(1)
+				repo.EXPECT().GetByID(gomock.Any(), req).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectedError: services.ErrNotFound, // Service maps this
@@ -532,7 +741,7 @@ func TestUserService_GetByID(t *testing.T) {
 				repo.EXPECT().GetByID(gomock.Any(), req).Return(nil, repoErrDbConnectionFailed).Times(1)
 			},
 			expectedUser:  nil,
-			expectedError: repoErrDbConnectionFailed, // Service currently passes through
+			expectedError: repoErrDbConnectionFailed,
 		},
 	}
 
@@ -562,7 +771,8 @@ func TestUserService_GetByEmail(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockUserRepo := mock_storage.NewMockUserRepository(ctrl)
-	userService := services.NewUserService(mockUserRepo, jwtSecret, jwtDuration)
+	// Pass nil for Redis client
+	userService := services.NewUserService(mockUserRepo, nil, jwtSecret, jwtDuration, refreshTokenDuration)
 	ctx := context.Background()
 
 	repoErrDbConnectionFailed := errors.New("db connection failed")
@@ -601,7 +811,7 @@ func TestUserService_GetByEmail(t *testing.T) {
 				Email: "notfound@example.com",
 			},
 			mockSetup: func(repo *mock_storage.MockUserRepository, req *dto.GetUserByEmailRequest) {
-				repo.EXPECT().GetByEmail(gomock.Any(), req).Return(nil, services.ErrNotFound).Times(1)
+				repo.EXPECT().GetByEmail(gomock.Any(), req).Return(nil, storage.ErrNotFound).Times(1)
 			},
 			expectedUser:  nil,
 			expectedError: services.ErrNotFound, // Service maps this
@@ -615,7 +825,7 @@ func TestUserService_GetByEmail(t *testing.T) {
 				repo.EXPECT().GetByEmail(gomock.Any(), req).Return(nil, repoErrDbConnectionFailed).Times(1)
 			},
 			expectedUser:  nil,
-			expectedError: repoErrDbConnectionFailed, // Service currently passes through
+			expectedError: repoErrDbConnectionFailed,
 		},
 	}
 

@@ -18,6 +18,7 @@ type Config struct {
 	CORS   CORSConfig   `mapstructure:"cors"`
 	JWT    JWTConfig    `mapstructure:"jwt"`
 	Blockchain BlockchainConfig `mapstructure:"blockchain"`
+	Redis      RedisConfig     `mapstructure:"redis"`
 }
 
 // ServerConfig holds server specific configuration
@@ -45,6 +46,8 @@ type JWTConfig struct {
 	Secret           string        `mapstructure:"secret"`
 	ExpirationMinutes int           `mapstructure:"expiration_minutes"` // Store as int from config/env
 	Expiration       time.Duration `mapstructure:"-"`                  // Calculated duration, ignore during unmarshal
+	RefreshExpirationHours int           `mapstructure:"refresh_expiration"`
+	RefreshExpiration time.Duration         `mapstructure:"-"`
 }
 
 // BlockchainConfig holds blockchain interaction configuration
@@ -53,6 +56,13 @@ type BlockchainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	ContractABIPath string `mapstructure:"contract_abi_path"`
 	Expiration       time.Duration `mapstructure:"-"`                  // Calculated duration, ignore during unmarshal
+}
+
+// RedisConfig holds Redis connection details.
+type RedisConfig struct {
+	Addr     string `mapstructure:"REDIS_ADDR"`     // e.g., "localhost:6379"
+	Password string `mapstructure:"REDIS_PASSWORD"` // Empty if no password
+	DB       int    `mapstructure:"REDIS_DB"`       // e.g., 0
 }
 
 // Load configuration from file and environment variables
@@ -72,8 +82,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
 	viper.SetDefault("database.name", "api_db")
-	viper.SetDefault("jwt.secret", "default-insecure-secret-key-change-me!") // !! CHANGE THIS VIA ENV !!
+	viper.SetDefault("redis.addr", "localhost:6379")
+	viper.SetDefault("redis.password", "")
+	viper.SetDefault("redis.db", 0)
+	viper.SetDefault("jwt.secret", "default-insecure-secret-key-change-me!")
 	viper.SetDefault("jwt.expiration_minutes", 60)
+	viper.SetDefault("jwt.refresh_expiration", "24")
 
 	// Defaults for Blockchain Listener 
 	viper.SetDefault("blockchain.rpc_url", "wss://ethereum-sepolia-rpc.publicnode.com") 
@@ -94,12 +108,13 @@ func Load() (*Config, error) {
 	}
 
 	// --- Bind Environment Variables ---
-	viper.SetEnvPrefix("API")
+	//viper.SetEnvPrefix("API")
 	viper.AutomaticEnv()
 	// Allow environment variable CORS_ALLOWED_ORIGINS to override (comma-separated string)
 	viper.BindEnv("cors.allowed_origins", "CORS_ALLOWED_ORIGINS")
-	viper.BindEnv("jwt.secret", "API_JWT_SECRET")
-	viper.BindEnv("jwt.expiration_minutes", "API_JWT_EXPIRATION_MINUTES")
+	viper.BindEnv("jwt.secret", "JWT_SECRET")
+	viper.BindEnv("jwt.expiration_minutes", "JWT_EXPIRATION_MINUTES")
+	viper.BindEnv("jwt.refresh_expiration", "JWT_REFRESH_EXPIRATION")
 	viper.BindEnv("blockchain.rpc_url", "BLOCKCHAIN_RPC_URL")
 	viper.BindEnv("blockchain.contract_address", "CONTRACT_ADDRESS")
 	viper.BindEnv("blockchain.contract_abi_path", "CONTRACT_ABI_PATH")
@@ -148,13 +163,18 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// JWT Overrides (using non-prefixed env vars like DB/Server for consistency)
+	// JWT Overrides
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		cfg.JWT.Secret = secret
 	}
 	if expStr := os.Getenv("JWT_EXPIRATION_MINUTES"); expStr != "" {
 		if exp, err := strconv.Atoi(expStr); err == nil {
 			cfg.JWT.ExpirationMinutes = exp
+		}
+	}
+	if rfrExpStr := os.Getenv("JWT_EXPIRATION_MINUTES"); rfrExpStr != "" {
+		if rfrExp, err := strconv.Atoi(rfrExpStr); err == nil {
+			cfg.JWT.RefreshExpirationHours = rfrExp
 		}
 	}
 
@@ -169,8 +189,22 @@ func Load() (*Config, error) {
 		cfg.Blockchain.ContractABIPath = abiPath
 	}
 
+	// Redis Overrides
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		cfg.Redis.Addr = redisAddr
+	}
+	if redisPass := os.Getenv("REDIS_PASSWORD"); redisPass != "" {
+		cfg.Redis.Password = redisPass
+	}
+	if redisDBStr := os.Getenv("REDIS_DB"); redisDBStr != "" {
+		if redisDB, err := strconv.Atoi(redisDBStr); err == nil {
+			cfg.Redis.DB = redisDB
+		}
+	}
+
 	// --- Calculate derived values ---
 	cfg.JWT.Expiration = time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute
+	cfg.JWT.RefreshExpiration = time.Duration(cfg.JWT.RefreshExpirationHours) * time.Hour
 
 	// --- Final Validation ---
 	if cfg.JWT.Secret == "default-insecure-secret-key-change-me!" {

@@ -53,5 +53,16 @@ type UserResponse struct {
 // LoginResponse defines the data returned after successful login.
 type LoginResponse struct {
 	User  UserResponse `json:"user"`
-	Token string       `json:"token,omitempty"` // For future JWT use
+	Token string       `json:"accessToken,omitempty"` // Access Token
+	RefreshToken string `json:"refreshToken"` // Refresh Token
+}
+
+// RefreshRequest defines the structure for requesting a new access token.
+type RefreshRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
+}
+
+// LogoutRequest defines the structure for requesting logout.
+type LogoutRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
 }

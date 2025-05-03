@@ -35,7 +35,6 @@ air_build.log
 .env
 
 # --- Optional Local Configuration Overrides ---
-# Uncomment if you use a specific file for local config overrides
 # config.local.yaml
 
 # --- OS Generated Files ---
@@ -60,3 +59,7 @@ Thumbs.db
 # Generally, .dockerignore handles the Docker build context well.
 # No common Docker runtime files need ignoring here usually.
 
+
+# Go test coverage files
+coverage.html
+coverage.out

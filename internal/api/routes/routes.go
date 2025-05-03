@@ -7,7 +7,7 @@ import (
 	"go-api-template/internal/api/middleware"
 	"go-api-template/internal/app"
 	"go-api-template/internal/services"
-	"log" // Keep log if you want the startup message
+	"log"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,7 +22,7 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	apiV1 := router.Group("/api/v1")
 
 	//Create services
-	userService := services.NewUserService(app.UserRepo, app.Config.JWT.Secret, app.Config.JWT.Expiration)
+	userService := services.NewUserService(app.UserRepo, app.RedisClient,app.Config.JWT.Secret, app.Config.JWT.Expiration, app.Config.JWT.RefreshExpiration)
 	jobService := services.NewJobService(app.JobRepo, app.UserRepo)
 	invoiceService := services.NewInvoiceService(app.InvoiceRepo, app.JobRepo)
 

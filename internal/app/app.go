@@ -7,16 +7,16 @@ import (
 
 	"github.com/go-playground/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 // Application holds core application dependencies.
 type Application struct {
 	Config   *config.Config
 	DBPool   *pgxpool.Pool
+	RedisClient *redis.Client
 	UserRepo storage.UserRepository
 	JobRepo storage.JobRepository
 	InvoiceRepo storage.InvoiceRepository
 	Validator *validator.Validate
-	// Add other repositories 
-	// Add services maybe (how to decide on this?)
 }

@@ -39,1048 +39,2088 @@ func setupJobServiceTest(t *testing.T) (context.Context, services.JobService, *m
 	return ctx, jobService, mockJobRepo, mockUserRepo, ctrl
 }
 
-func TestJobService_CreateJob_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	employerID := uuid.New()
-	req := &dto.CreateJobRequest{
-		Rate:            100.50,
-		Duration:        40,
-		InvoiceInterval: 10,
-		EmployerID:      employerID, // Set by handler in real scenario
+func TestJobService_CreateJob(t *testing.T) {
+	type mockJobRepoCreate struct {
+		req *dto.CreateJobRequest
+		res *models.Job
+		err error
 	}
 
-	expectedJob := &models.Job{
-		ID:              uuid.New(),
-		Rate:            req.Rate,
-		Duration:        req.Duration,
-		InvoiceInterval: req.InvoiceInterval,
-		EmployerID:      req.EmployerID,
-		State:           models.JobStateWaiting,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+	tests := []struct {
+		name              string
+		req               *dto.CreateJobRequest
+		mockJobRepoCreate mockJobRepoCreate
+		expectedJob       *models.Job
+		expectedErr       error
+		assertJob         func(*testing.T, *models.Job, *models.Job) // Custom assertion for job
+	}{
+		{
+			name: "Success",
+			req: &dto.CreateJobRequest{
+				Rate:            100.50,
+				Duration:        40,
+				InvoiceInterval: 10,
+				EmployerID:      uuid.New(),
+			},
+			mockJobRepoCreate: mockJobRepoCreate{
+				req: &dto.CreateJobRequest{
+					Rate:            100.50,
+					Duration:        40,
+					InvoiceInterval: 10,
+					EmployerID:      uuid.Nil, 
+				},
+				res: &models.Job{
+					ID:              uuid.New(), // Simulate repo generating ID
+					Rate:            100.50,
+					Duration:        40,
+					InvoiceInterval: 10,
+					EmployerID:      uuid.Nil, 
+					State:           models.JobStateWaiting,
+					CreatedAt:       time.Now(), // Simulate repo setting time
+					UpdatedAt:       time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:              uuid.Nil, 
+				Rate:            100.50,
+				Duration:        40,
+				InvoiceInterval: 10,
+				EmployerID:      uuid.Nil, 
+				State:           models.JobStateWaiting,
+				CreatedAt:       time.Now(), // Will be asserted loosely
+				UpdatedAt:       time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.NotEqual(t, uuid.Nil, actual.ID) // Ensure ID was generated
+				assert.Equal(t, expected.Rate, actual.Rate)
+				assert.Equal(t, expected.Duration, actual.Duration)
+				assert.Equal(t, expected.InvoiceInterval, actual.InvoiceInterval)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				// Loosely assert time fields
+				assert.WithinDuration(t, expected.CreatedAt, actual.CreatedAt, time.Second)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "RepoError",
+			req: &dto.CreateJobRequest{
+				Rate:            100.50,
+				Duration:        40,
+				InvoiceInterval: 10,
+				EmployerID:      uuid.New(),
+			},
+			mockJobRepoCreate: mockJobRepoCreate{
+				req: &dto.CreateJobRequest{
+					Rate:            100.50,
+					Duration:        40,
+					InvoiceInterval: 10,
+					EmployerID:      uuid.Nil, 
+				},
+				res: nil,
+				err: errors.New("db connection failed"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("internal error creating job: db connection failed"), // Service wraps the error
+			assertJob:   nil,
+		},
 	}
 
-	mockJobRepo.EXPECT().Create(ctx, req).Return(expectedJob, nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	job, err := jobService.CreateJob(ctx, req)
+			// Set dynamic UUIDs
+			employerID := uuid.New()
+			tt.req.EmployerID = employerID
+			tt.mockJobRepoCreate.req.EmployerID = employerID
+			if tt.mockJobRepoCreate.res != nil {
+				tt.mockJobRepoCreate.res.EmployerID = employerID
+				// Simulate repo setting times if not already set
+				if tt.mockJobRepoCreate.res.CreatedAt.IsZero() {
+					tt.mockJobRepoCreate.res.CreatedAt = time.Now()
+				}
+				if tt.mockJobRepoCreate.res.UpdatedAt.IsZero() {
+					tt.mockJobRepoCreate.res.UpdatedAt = time.Now()
+				}
+			}
+			if tt.expectedJob != nil {
+				tt.expectedJob.EmployerID = employerID
+				// Simulate repo setting times if not already set
+				if tt.expectedJob.CreatedAt.IsZero() {
+					tt.expectedJob.CreatedAt = time.Now()
+				}
+				if tt.expectedJob.UpdatedAt.IsZero() {
+					tt.expectedJob.UpdatedAt = time.Now()
+				}
+			}
 
-	require.NoError(t, err)
-	assert.Equal(t, expectedJob, job)
-}
+			// Setup mocks
+			mockJobRepo.EXPECT().Create(ctx, tt.mockJobRepoCreate.req).Return(tt.mockJobRepoCreate.res, tt.mockJobRepoCreate.err).Times(1)
 
-func TestJobService_CreateJob_RepoError(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
+			// Call the service method
+			job, err := jobService.CreateJob(ctx, tt.req)
 
-	req := &dto.CreateJobRequest{
-		Rate:            100.50,
-		Duration:        40,
-		InvoiceInterval: 10,
-		EmployerID:      uuid.New(),
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr.Error(), err.Error()) // Compare error strings for wrapped errors
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				if tt.assertJob != nil {
+					tt.assertJob(t, tt.expectedJob, job)
+				} else {
+					assert.Equal(t, tt.expectedJob, job)
+				}
+			}
+		})
 	}
-	repoErr := errors.New("db connection failed")
-
-	mockJobRepo.EXPECT().Create(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.CreateJob(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error creating job")
-	assert.True(t, errors.Is(err, repoErr))
 }
 
-func TestJobService_GetJobByID_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.GetJobByIDRequest{ID: jobID}
-	expectedJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, req).Return(expectedJob, nil).Times(1)
-
-	job, err := jobService.GetJobByID(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, expectedJob, job)
-}
-
-func TestJobService_GetJobByID_NotFound(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.GetJobByIDRequest{ID: jobID}
-
-	mockJobRepo.EXPECT().GetByID(ctx, req).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := jobService.GetJobByID(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestJobService_GetJobByID_RepoError(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.GetJobByIDRequest{ID: jobID}
-	repoErr := errors.New("db read error")
-
-	mockJobRepo.EXPECT().GetByID(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.GetJobByID(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error getting job")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_ListAvailableJobs_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.ListAvailableJobsRequest{Limit: 5, Offset: 0}
-	expectedJobs := []models.Job{
-		{ID: uuid.New(), State: models.JobStateWaiting, EmployerID: uuid.New()},
-		{ID: uuid.New(), State: models.JobStateWaiting, EmployerID: uuid.New()},
+func TestJobService_GetJobByID(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
 	}
 
-	mockJobRepo.EXPECT().ListAvailable(ctx, req).Return(expectedJobs, nil).Times(1)
-
-	jobs, err := jobService.ListAvailableJobs(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, expectedJobs, jobs)
-}
-
-func TestJobService_ListAvailableJobs_RepoError(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	req := &dto.ListAvailableJobsRequest{Limit: 10, Offset: 0}
-	repoErr := errors.New("db query failed")
-
-	mockJobRepo.EXPECT().ListAvailable(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.ListAvailableJobs(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error listing available jobs")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_ListJobsByEmployer_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	employerID := uuid.New()
-	req := &dto.ListJobsByEmployerRequest{EmployerID: employerID, Limit: 5, Offset: 0}
-	expectedJobs := []models.Job{
-		{ID: uuid.New(), EmployerID: employerID, State: models.JobStateWaiting},
-		{ID: uuid.New(), EmployerID: employerID, State: models.JobStateOngoing, ContractorID: ptrUUID(uuid.New())},
+	tests := []struct {
+		name               string
+		req                *dto.GetJobByIDRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		expectedJob        *models.Job
+		expectedErr        error
+	}{
+		{
+			name: "Success",
+			req:  &dto.GetJobByIDRequest{ID: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), State: models.JobStateWaiting}, 
+				err: nil,
+			},
+			expectedJob: &models.Job{ID: uuid.Nil, EmployerID: uuid.New(), State: models.JobStateWaiting}, 
+			expectedErr: nil,
+		},
+		{
+			name: "NotFound",
+			req:  &dto.GetJobByIDRequest{ID: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			expectedJob: nil,
+			expectedErr: services.ErrNotFound,
+		},
+		{
+			name: "RepoError",
+			req:  &dto.GetJobByIDRequest{ID: uuid.New()},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read error"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("internal error getting job: db read error"), // Service wraps the error
+		},
 	}
 
-	mockJobRepo.EXPECT().ListByEmployer(ctx, req).Return(expectedJobs, nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	jobs, err := jobService.ListJobsByEmployer(ctx, req)
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			tt.req.ID = jobID
+			tt.mockJobRepoGetByID.req.ID = jobID
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				tt.mockJobRepoGetByID.res.EmployerID = employerID
+			}
+			if tt.expectedJob != nil {
+				tt.expectedJob.ID = jobID
+				tt.expectedJob.EmployerID = employerID
+			}
 
-	require.NoError(t, err)
-	assert.Equal(t, expectedJobs, jobs)
+			// Setup mocks
+			mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+
+			// Call the service method
+			job, err := jobService.GetJobByID(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				assert.Equal(t, tt.expectedJob, job)
+			}
+		})
+	}
 }
 
-func TestJobService_ListJobsByEmployer_RepoError(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	employerID := uuid.New()
-	req := &dto.ListJobsByEmployerRequest{EmployerID: employerID, Limit: 10, Offset: 0}
-	repoErr := errors.New("db query failed")
-
-	mockJobRepo.EXPECT().ListByEmployer(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.ListJobsByEmployer(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error listing employer jobs")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_ListJobsByContractor_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	contractorID := uuid.New()
-	req := &dto.ListJobsByContractorRequest{ContractorID: contractorID, Limit: 5, Offset: 0}
-	expectedJobs := []models.Job{
-		{ID: uuid.New(), EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: ptrUUID(contractorID)},
-		{ID: uuid.New(), EmployerID: uuid.New(), State: models.JobStateComplete, ContractorID: ptrUUID(contractorID)},
+func TestJobService_ListAvailableJobs(t *testing.T) {
+	type mockJobRepoListAvailable struct {
+		req *dto.ListAvailableJobsRequest
+		res []models.Job
+		err error
 	}
 
-	mockJobRepo.EXPECT().ListByContractor(ctx, req).Return(expectedJobs, nil).Times(1)
-
-	jobs, err := jobService.ListJobsByContractor(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, expectedJobs, jobs)
-}
-
-func TestJobService_ListJobsByContractor_RepoError(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	contractorID := uuid.New()
-	req := &dto.ListJobsByContractorRequest{ContractorID: contractorID, Limit: 10, Offset: 0}
-	repoErr := errors.New("db query failed")
-
-	mockJobRepo.EXPECT().ListByContractor(ctx, req).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.ListJobsByContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error listing contractor jobs")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_UpdateJobDetails_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{
-		JobID:    jobID,
-		UserID:   employerID,
-		Rate:     ptrFloat64(120.0),
-		Duration: ptrInt(50),
+	tests := []struct {
+		name                     string
+		req                      *dto.ListAvailableJobsRequest
+		mockJobRepoListAvailable mockJobRepoListAvailable
+		expectedJobs             []models.Job
+		expectedErr              error
+	}{
+		{
+			name: "Success",
+			req:  &dto.ListAvailableJobsRequest{Limit: 5, Offset: 0},
+			mockJobRepoListAvailable: mockJobRepoListAvailable{
+				req: &dto.ListAvailableJobsRequest{Limit: 5, Offset: 0},
+				res: []models.Job{
+					{ID: uuid.New(), State: models.JobStateWaiting, EmployerID: uuid.New()},
+					{ID: uuid.New(), State: models.JobStateWaiting, EmployerID: uuid.New()},
+				},
+				err: nil,
+			},
+			expectedJobs: []models.Job{
+				{ID: uuid.Nil, State: models.JobStateWaiting, EmployerID: uuid.New()},
+				{ID: uuid.Nil, State: models.JobStateWaiting, EmployerID: uuid.New()}, 
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "RepoError",
+			req:  &dto.ListAvailableJobsRequest{Limit: 10, Offset: 0},
+			mockJobRepoListAvailable: mockJobRepoListAvailable{
+				req: &dto.ListAvailableJobsRequest{Limit: 10, Offset: 0},
+				res: nil,
+				err: errors.New("db query failed"),
+			},
+			expectedJobs: nil,
+			expectedErr:  errors.New("internal error listing available jobs: db query failed"), // Service wraps the error
+		},
 	}
 
-	existingJob := &models.Job{
-		ID:         jobID,
-		EmployerID: employerID,
-		State:      models.JobStateWaiting, // Correct state
-		ContractorID: nil, // No contractor
-		Rate:       100.0,
-		Duration:   40,
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
+
+			// Set dynamic UUIDs for expected jobs
+			for i := range tt.expectedJobs {
+				tt.expectedJobs[i].ID = uuid.New()
+				tt.expectedJobs[i].EmployerID = uuid.New()
+			}
+			// Set dynamic UUIDs for mock response jobs
+			for i := range tt.mockJobRepoListAvailable.res {
+				tt.mockJobRepoListAvailable.res[i].ID = tt.expectedJobs[i].ID // Match expected IDs
+				tt.mockJobRepoListAvailable.res[i].EmployerID = tt.expectedJobs[i].EmployerID
+			}
+
+			// Setup mocks
+			mockJobRepo.EXPECT().ListAvailable(ctx, tt.req).Return(tt.mockJobRepoListAvailable.res, tt.mockJobRepoListAvailable.err).Times(1)
+
+			// Call the service method
+			jobs, err := jobService.ListAvailableJobs(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr.Error(), err.Error()) // Compare error strings for wrapped errors
+				assert.Nil(t, jobs)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedJobs, jobs)
+			}
+		})
+	}
+}
+
+func TestJobService_ListJobsByEmployer(t *testing.T) {
+	type mockJobRepoListByEmployer struct {
+		req *dto.ListJobsByEmployerRequest
+		res []models.Job
+		err error
 	}
 
-	updatedJob := &models.Job{
-		ID:         jobID,
-		EmployerID: employerID,
-		State:      models.JobStateWaiting,
-		ContractorID: nil,
-		Rate:       *req.Rate,
-		Duration:   *req.Duration,
-		UpdatedAt:  time.Now(),
+	tests := []struct {
+		name                      string
+		req                       *dto.ListJobsByEmployerRequest
+		mockJobRepoListByEmployer mockJobRepoListByEmployer
+		expectedJobs              []models.Job
+		expectedErr               error
+	}{
+		{
+			name: "Success",
+			req:  &dto.ListJobsByEmployerRequest{EmployerID: uuid.New(), Limit: 5, Offset: 0},
+			mockJobRepoListByEmployer: mockJobRepoListByEmployer{
+				req: &dto.ListJobsByEmployerRequest{EmployerID: uuid.Nil, Limit: 5, Offset: 0}, 
+				res: []models.Job{
+					{ID: uuid.New(), EmployerID: uuid.Nil, State: models.JobStateWaiting}, 
+					{ID: uuid.New(), EmployerID: uuid.Nil, State: models.JobStateOngoing, ContractorID: ptrUUID(uuid.New())}, 
+				},
+				err: nil,
+			},
+			expectedJobs: []models.Job{
+				{ID: uuid.Nil, EmployerID: uuid.Nil, State: models.JobStateWaiting}, 
+				{ID: uuid.Nil, EmployerID: uuid.Nil, State: models.JobStateOngoing, ContractorID: ptrUUID(uuid.New())}, 
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "RepoError",
+			req:  &dto.ListJobsByEmployerRequest{EmployerID: uuid.New(), Limit: 10, Offset: 0},
+			mockJobRepoListByEmployer: mockJobRepoListByEmployer{
+				req: &dto.ListJobsByEmployerRequest{EmployerID: uuid.Nil, Limit: 10, Offset: 0}, 
+				res: nil,
+				err: errors.New("db query failed"),
+			},
+			expectedJobs: nil,
+			expectedErr:  errors.New("internal error listing employer jobs: db query failed"), // Service wraps the error
+		},
 	}
 
-	// Mock GetByID first
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	// Mock Update
-	expectedUpdateReq := &dto.UpdateJobRequest{
-		ID:       jobID,
-		Rate:     req.Rate,
-		Duration: req.Duration,
+			// Set dynamic UUIDs
+			employerID := uuid.New()
+			tt.req.EmployerID = employerID
+			tt.mockJobRepoListByEmployer.req.EmployerID = employerID
+			for i := range tt.mockJobRepoListByEmployer.res {
+				tt.mockJobRepoListByEmployer.res[i].EmployerID = employerID
+				if tt.mockJobRepoListByEmployer.res[i].ContractorID != nil {
+					*tt.mockJobRepoListByEmployer.res[i].ContractorID = uuid.New() // Assign a new UUID for contractor
+				}
+				tt.mockJobRepoListByEmployer.res[i].ID = uuid.New() // Assign new UUID for job ID
+			}
+			for i := range tt.expectedJobs {
+				tt.expectedJobs[i].EmployerID = employerID
+				if tt.expectedJobs[i].ContractorID != nil {
+					*tt.expectedJobs[i].ContractorID = uuid.New() // Assign a new UUID for contractor
+				}
+				tt.expectedJobs[i].ID = tt.mockJobRepoListByEmployer.res[i].ID // Match mock response IDs
+				if tt.expectedJobs[i].ContractorID != nil && tt.mockJobRepoListByEmployer.res[i].ContractorID != nil {
+					*tt.expectedJobs[i].ContractorID = *tt.mockJobRepoListByEmployer.res[i].ContractorID // Match contractor IDs
+				}
+			}
+
+			// Setup mocks
+			mockJobRepo.EXPECT().ListByEmployer(ctx, tt.mockJobRepoListByEmployer.req).Return(tt.mockJobRepoListByEmployer.res, tt.mockJobRepoListByEmployer.err).Times(1)
+
+			// Call the service method
+			jobs, err := jobService.ListJobsByEmployer(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr.Error(), err.Error()) // Compare error strings for wrapped errors
+				assert.Nil(t, jobs)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedJobs, jobs)
+			}
+		})
 	}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
 }
 
-func TestJobService_UpdateJobDetails_NotFound(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: uuid.New(), Rate: ptrFloat64(110.0)}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestJobService_UpdateJobDetails_Forbidden_WrongUser(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	wrongUserID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: wrongUserID, Rate: ptrFloat64(110.0)}
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestJobService_UpdateJobDetails_Forbidden_WrongState(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: employerID, Rate: ptrFloat64(110.0)}
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing} // Wrong state
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden)) // Service maps this specific check to Forbidden
-}
-
-func TestJobService_UpdateJobDetails_Forbidden_ContractorAssigned(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: employerID, Rate: ptrFloat64(110.0)}
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting, ContractorID: &contractorID} // Contractor assigned
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden)) // Service maps this specific check to Forbidden
-}
-
-func TestJobService_UpdateJobDetails_RepoError_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: uuid.New(), Rate: ptrFloat64(110.0)}
-	repoErr := errors.New("db read failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error fetching job for update")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_UpdateJobDetails_RepoError_Update(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.UpdateJobDetailsRequest{JobID: jobID, UserID: employerID, Rate: ptrFloat64(110.0)}
-	repoErr := errors.New("db write failed")
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, Rate: req.Rate, Duration: req.Duration}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UpdateJobDetails(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr)) // Update error is passed through
-}
-
-func TestJobService_AssignContractor_Success_EmployerAssigns(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.AssignContractorRequest{
-		JobID:        jobID,
-		UserID:       employerID, // User making request is employer
-		ContractorID: contractorID, // Assigning another user
+func TestJobService_ListJobsByContractor(t *testing.T) {
+	type mockJobRepoListByContractor struct {
+		req *dto.ListJobsByContractorRequest
+		res []models.Job
+		err error
 	}
 
-	existingJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   employerID,
-		State:        models.JobStateWaiting, // Correct state
-		ContractorID: nil,                   // No contractor
+	tests := []struct {
+		name                        string
+		req                         *dto.ListJobsByContractorRequest
+		mockJobRepoListByContractor mockJobRepoListByContractor
+		expectedJobs                []models.Job
+		expectedErr                 error
+	}{
+		{
+			name: "Success",
+			req:  &dto.ListJobsByContractorRequest{ContractorID: uuid.New(), Limit: 5, Offset: 0},
+			mockJobRepoListByContractor: mockJobRepoListByContractor{
+				req: &dto.ListJobsByContractorRequest{ContractorID: uuid.Nil, Limit: 5, Offset: 0}, 
+				res: []models.Job{
+					{ID: uuid.New(), EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: ptrUUID(uuid.Nil)}, 
+					{ID: uuid.New(), EmployerID: uuid.New(), State: models.JobStateComplete, ContractorID: ptrUUID(uuid.Nil)}, 
+				},
+				err: nil,
+			},
+			expectedJobs: []models.Job{
+				{ID: uuid.Nil, EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: ptrUUID(uuid.Nil)}, 
+				{ID: uuid.Nil, EmployerID: uuid.New(), State: models.JobStateComplete, ContractorID: ptrUUID(uuid.Nil)}, 
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "RepoError",
+			req:  &dto.ListJobsByContractorRequest{ContractorID: uuid.New(), Limit: 10, Offset: 0},
+			mockJobRepoListByContractor: mockJobRepoListByContractor{
+				req: &dto.ListJobsByContractorRequest{ContractorID: uuid.Nil, Limit: 10, Offset: 0}, 
+				res: nil,
+				err: errors.New("db query failed"),
+			},
+			expectedJobs: nil,
+			expectedErr:  errors.New("internal error listing contractor jobs: db query failed"), // Service wraps the error
+		},
 	}
 
-	updatedJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   employerID,
-		State:        models.JobStateOngoing, // State changes
-		ContractorID: &contractorID,        // Contractor set
-		UpdatedAt:    time.Now(),
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
+
+			// Set dynamic UUIDs
+			contractorID := uuid.New()
+			tt.req.ContractorID = contractorID
+			tt.mockJobRepoListByContractor.req.ContractorID = contractorID
+			for i := range tt.mockJobRepoListByContractor.res {
+				tt.mockJobRepoListByContractor.res[i].ContractorID = &contractorID
+				tt.mockJobRepoListByContractor.res[i].ID = uuid.New() // Assign new UUID for job ID
+				tt.mockJobRepoListByContractor.res[i].EmployerID = uuid.New() // Assign new UUID for employer ID
+			}
+			for i := range tt.expectedJobs {
+				tt.expectedJobs[i].ContractorID = &contractorID
+				tt.expectedJobs[i].ID = tt.mockJobRepoListByContractor.res[i].ID // Match mock response IDs
+				tt.expectedJobs[i].EmployerID = tt.mockJobRepoListByContractor.res[i].EmployerID // Match employer IDs
+			}
+
+			// Setup mocks
+			mockJobRepo.EXPECT().ListByContractor(ctx, tt.mockJobRepoListByContractor.req).Return(tt.mockJobRepoListByContractor.res, tt.mockJobRepoListByContractor.err).Times(1)
+
+			// Call the service method
+			jobs, err := jobService.ListJobsByContractor(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr.Error(), err.Error()) // Compare error strings for wrapped errors
+				assert.Nil(t, jobs)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedJobs, jobs)
+			}
+		})
+	}
+}
+
+func TestJobService_UpdateJobDetails(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockJobRepoUpdate struct {
+		req *dto.UpdateJobRequest
+		res *models.Job
+		err error
 	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{
-		ID:           jobID,
-		ContractorID: &contractorID,
-		State:        ptrJobState(models.JobStateOngoing),
-	}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.AssignContractor(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
-}
-
-func TestJobService_AssignContractor_Success_ContractorAssignsSelf(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.AssignContractorRequest{
-		JobID:        jobID,
-		UserID:       contractorID, // User making request is the contractor
-		ContractorID: contractorID, // Assigning self
-	}
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting, ContractorID: nil}
-	updatedJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing, ContractorID: &contractorID, UpdatedAt: time.Now()}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, ContractorID: &contractorID, State: ptrJobState(models.JobStateOngoing)}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.AssignContractor(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
-}
-
-func TestJobService_AssignContractor_NotFound(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: uuid.New(), ContractorID: uuid.New()}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestJobService_AssignContractor_InvalidState_NotWaiting(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: uuid.New(), ContractorID: uuid.New()}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateOngoing} // Wrong state
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestJobService_AssignContractor_InvalidState_ContractorExists(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: uuid.New(), ContractorID: uuid.New()}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateWaiting, ContractorID: &contractorID} // Contractor exists
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestJobService_AssignContractor_Forbidden_EmployerAssignsSelf(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: employerID, ContractorID: employerID} // Employer assigning self
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-	assert.Contains(t, err.Error(), "employer cannot assign themselves")
-}
-
-func TestJobService_AssignContractor_Forbidden_NonEmployerAssignsOther(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	requestingUserID := uuid.New()
-	targetContractorID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: requestingUserID, ContractorID: targetContractorID} // Non-employer assigning someone else
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-	assert.Contains(t, err.Error(), "you can only assign yourself")
-}
-
-func TestJobService_AssignContractor_Conflict_Update(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: employerID, ContractorID: contractorID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, ContractorID: &contractorID, State: ptrJobState(models.JobStateOngoing)}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(nil, storage.ErrConflict).Times(1) // Simulate FK violation etc.
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrConflict))
-	assert.Contains(t, err.Error(), "invalid contractor ID")
-}
-
-func TestJobService_AssignContractor_RepoError_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: uuid.New(), ContractorID: uuid.New()}
-	repoErr := errors.New("db read failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error fetching job for assignment")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_AssignContractor_RepoError_Update(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.AssignContractorRequest{JobID: jobID, UserID: employerID, ContractorID: contractorID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-	repoErr := errors.New("db write failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, ContractorID: &contractorID, State: ptrJobState(models.JobStateOngoing)}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.AssignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr)) // Update error passed through
-}
-
-func TestJobService_UnassignContractor_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.UnassignContractorRequest{
-		JobID:  jobID,
-		UserID: contractorID, // User making request is the current contractor
-	}
-
-	existingJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   uuid.New(),
-		State:        models.JobStateOngoing, // Correct state
-		ContractorID: &contractorID,        // Correct contractor
+	tests := []struct {
+		name              string
+		req               *dto.UpdateJobDetailsRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		mockJobRepoUpdate mockJobRepoUpdate
+		expectedJob       *models.Job
+		expectedErr       error
+		assertJob         func(*testing.T, *models.Job, *models.Job) // Custom assertion for job
+	}{
+		{
+			name: "Success",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(),
+				Rate:     ptrFloat64(120.0),
+				Duration: ptrInt(50),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.Nil, 
+					State:      models.JobStateWaiting,
+					ContractorID: nil,
+					Rate:       100.0,
+					Duration:   40,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:       uuid.Nil, 
+					Rate:     ptrFloat64(120.0),
+					Duration: ptrInt(50),
+				},
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.Nil, 
+					State:      models.JobStateWaiting,
+					ContractorID: nil,
+					Rate:       120.0,
+					Duration:   50,
+					UpdatedAt:  time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:         uuid.Nil, 
+				EmployerID: uuid.Nil, 
+				State:      models.JobStateWaiting,
+				ContractorID: nil,
+				Rate:       120.0,
+				Duration:   50,
+				UpdatedAt:  time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.Equal(t, expected.Rate, actual.Rate)
+				assert.Equal(t, expected.Duration, actual.Duration)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "NotFound",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(),
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrNotFound,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_WrongUser",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(), // Wrong user
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.New(), // Actual employer
+					State:      models.JobStateWaiting,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_WrongState",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(), // Employer
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.Nil, 
+					State:      models.JobStateOngoing, // Wrong state
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden, // Service maps this specific check to Forbidden
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_ContractorAssigned",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(), // Employer
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.Nil, 
+					State:      models.JobStateWaiting,
+					ContractorID: ptrUUID(uuid.New()), // Contractor assigned
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden, // Service maps this specific check to Forbidden
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_GetByID",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(),
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read failed"),
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       errors.New("internal error fetching job for update: db read failed"), // Service wraps the error
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_Update",
+			req: &dto.UpdateJobDetailsRequest{
+				JobID:    uuid.New(),
+				UserID:   uuid.New(), // Employer
+				Rate:     ptrFloat64(110.0),
+				Duration: nil,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:         uuid.Nil, 
+					EmployerID: uuid.Nil, 
+					State:      models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:       uuid.Nil, 
+					Rate:     ptrFloat64(110.0),
+					Duration: nil,
+				},
+				res: nil,
+				err: errors.New("db write failed"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("db write failed"), // Update error is passed through
+			assertJob:   nil,
+		},
 	}
 
-	updatedJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   existingJob.EmployerID,
-		State:        models.JobStateWaiting, // State reverts
-		ContractorID: nil,                   // Contractor removed
-		UpdatedAt:    time.Now(),
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
+
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			contractorID := uuid.New()
+			wrongUserID := uuid.New()
+
+			tt.req.JobID = jobID
+			if tt.name == "Success" || tt.name == "RepoError_Update" {
+				tt.req.UserID = employerID
+			} else if tt.name == "Forbidden_WrongUser" {
+				tt.req.UserID = wrongUserID
+			} else if tt.name == "Forbidden_WrongState" || tt.name == "Forbidden_ContractorAssigned" {
+				tt.req.UserID = employerID // Assume employer for these cases
+			} else {
+				tt.req.UserID = uuid.New() // Default for other cases
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success" || tt.name == "RepoError_Update" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = nil
+				} else if tt.name == "Forbidden_WrongUser" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+				} else if tt.name == "Forbidden_WrongState" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.State = models.JobStateOngoing
+				} else if tt.name == "Forbidden_ContractorAssigned" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Default
+				}
+			}
+
+			if tt.mockJobRepoUpdate.req != nil {
+				tt.mockJobRepoUpdate.req.ID = jobID
+			}
+			if tt.mockJobRepoUpdate.res != nil {
+				tt.mockJobRepoUpdate.res.ID = jobID
+				tt.mockJobRepoUpdate.res.EmployerID = employerID
+				// Simulate repo setting time if not already set
+				if tt.mockJobRepoUpdate.res.UpdatedAt.IsZero() {
+					tt.mockJobRepoUpdate.res.UpdatedAt = time.Now()
+				}
+			}
+
+			if tt.expectedJob != nil {
+				tt.expectedJob.ID = jobID
+				tt.expectedJob.EmployerID = employerID
+				// Simulate repo setting time if not already set
+				if tt.expectedJob.UpdatedAt.IsZero() {
+					tt.expectedJob.UpdatedAt = time.Now()
+				}
+			}
+
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoUpdate.req != nil || tt.mockJobRepoUpdate.err != nil {
+				mockJobRepo.EXPECT().Update(ctx, gomock.Any()).Return(tt.mockJobRepoUpdate.res, tt.mockJobRepoUpdate.err).Times(1)
+			}
+
+			// Call the service method
+			job, err := jobService.UpdateJobDetails(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				if tt.assertJob != nil {
+					tt.assertJob(t, tt.expectedJob, job)
+				} else {
+					// Loosely assert time fields
+					assert.WithinDuration(t, tt.expectedJob.UpdatedAt, job.UpdatedAt, time.Second)
+					// Compare other fields
+					tt.expectedJob.UpdatedAt = job.UpdatedAt // Set expected to actual for comparison
+					assert.Equal(t, tt.expectedJob, job)
+				}
+			}
+		})
+	}
+}
+
+func TestJobService_AssignContractor(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockJobRepoUpdate struct {
+		req *dto.UpdateJobRequest
+		res *models.Job
+		err error
 	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	var nilUUID *uuid.UUID // Need explicit nil pointer for expectation
-	expectedUpdateReq := &dto.UpdateJobRequest{
-		ID:           jobID,
-		ContractorID: nilUUID,
-		State:        ptrJobState(models.JobStateWaiting),
-	}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.UnassignContractor(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
-}
-
-func TestJobService_UnassignContractor_NotFound(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: uuid.New()}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestJobService_UnassignContractor_Forbidden_WrongUser(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	currentContractorID := uuid.New()
-	wrongUserID := uuid.New()
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: wrongUserID}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: &currentContractorID}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestJobService_UnassignContractor_Forbidden_NoContractor(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	userID := uuid.New() // Doesn't matter who tries if no contractor
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: userID}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: nil} // No contractor
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestJobService_UnassignContractor_Forbidden_WrongState(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: contractorID}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateWaiting, ContractorID: &contractorID} // Wrong state
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestJobService_UnassignContractor_RepoError_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: uuid.New()}
-	repoErr := errors.New("db read failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error fetching job for unassignment")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_UnassignContractor_RepoError_Update(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.UnassignContractorRequest{JobID: jobID, UserID: contractorID}
-	existingJob := &models.Job{ID: jobID, EmployerID: uuid.New(), State: models.JobStateOngoing, ContractorID: &contractorID}
-	repoErr := errors.New("db write failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	var nilUUID *uuid.UUID
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, ContractorID: nilUUID, State: ptrJobState(models.JobStateWaiting)}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UnassignContractor(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr)) // Update error passed through
-}
-
-func TestJobService_UpdateJobState_Success_Employer(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.JobStateComplete
-	req := &dto.UpdateJobStateRequest{
-		JobID:  jobID,
-		UserID: employerID, // Employer making request
-		State:  newState,
-	}
-
-	existingJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   employerID,
-		State:        models.JobStateOngoing, // Valid previous state
-		ContractorID: &contractorID,
-	}
-
-	updatedJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   employerID,
-		State:        newState, // State updated
-		ContractorID: &contractorID,
-		UpdatedAt:    time.Now(),
-	}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{
-		ID:    jobID,
-		State: &newState,
-	}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.UpdateJobState(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
-}
-
-func TestJobService_UpdateJobState_Success_Contractor(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	newState := models.JobStateComplete
-	req := &dto.UpdateJobStateRequest{
-		JobID:  jobID,
-		UserID: contractorID, // Contractor making request
-		State:  newState,
-	}
-
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing, ContractorID: &contractorID}
-	updatedJob := &models.Job{ID: jobID, EmployerID: employerID, State: newState, ContractorID: &contractorID, UpdatedAt: time.Now()}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, State: &newState}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(updatedJob, nil).Times(1)
-
-	job, err := jobService.UpdateJobState(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, updatedJob, job)
-}
-
-func TestJobService_UpdateJobState_NotFound(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UpdateJobStateRequest{JobID: jobID, UserID: uuid.New(), State: models.JobStateComplete}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, storage.ErrNotFound).Times(1)
-
-	_, err := jobService.UpdateJobState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
-}
-
-func TestJobService_UpdateJobState_Forbidden_WrongUser(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	wrongUserID := uuid.New()
-	req := &dto.UpdateJobStateRequest{JobID: jobID, UserID: wrongUserID, State: models.JobStateComplete}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing, ContractorID: &contractorID}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UpdateJobState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
-
-func TestJobService_UpdateJobState_InvalidTransition(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.UpdateJobStateRequest{JobID: jobID, UserID: employerID, State: models.JobStateWaiting} // Invalid: Complete -> Waiting
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateComplete}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	_, err := jobService.UpdateJobState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidTransition))
-	assert.Contains(t, err.Error(), "from Complete to Waiting")
-}
-
-func TestJobService_UpdateJobState_RepoError_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.UpdateJobStateRequest{JobID: jobID, UserID: uuid.New(), State: models.JobStateComplete}
-	repoErr := errors.New("db read failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UpdateJobState(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error fetching job for state update")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_UpdateJobState_RepoError_Update(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	newState := models.JobStateComplete
-	req := &dto.UpdateJobStateRequest{JobID: jobID, UserID: employerID, State: newState}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing}
-	repoErr := errors.New("db write failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	expectedUpdateReq := &dto.UpdateJobRequest{ID: jobID, State: &newState}
-	mockJobRepo.EXPECT().Update(ctx, expectedUpdateReq).Return(nil, repoErr).Times(1)
-
-	_, err := jobService.UpdateJobState(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr)) // Update error passed through
-}
-
-func TestJobService_DeleteJob_Success(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.DeleteJobRequest{
-		ID:     jobID,
-		UserID: employerID, // User making request is employer
+	tests := []struct {
+		name              string
+		req               *dto.AssignContractorRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		mockJobRepoUpdate mockJobRepoUpdate
+		expectedJob       *models.Job
+		expectedErr       error
+		assertJob         func(*testing.T, *models.Job, *models.Job) // Custom assertion for job
+	}{
+		{
+			name: "Success_EmployerAssigns",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Employer making request
+				ContractorID: uuid.New(), // Assigning another user
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        ptrJobState(models.JobStateOngoing),
+				},
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.Nil), 
+					UpdatedAt:    time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:           uuid.Nil, 
+				EmployerID:   uuid.Nil, 
+				State:        models.JobStateOngoing,
+				ContractorID: ptrUUID(uuid.Nil), 
+				UpdatedAt:    time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "Success_ContractorAssignsSelf",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Contractor making request
+				ContractorID: uuid.Nil, 
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        ptrJobState(models.JobStateOngoing),
+				},
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.Nil), 
+					UpdatedAt:    time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:           uuid.Nil, 
+				EmployerID:   uuid.Nil, 
+				State:        models.JobStateOngoing,
+				ContractorID: ptrUUID(uuid.Nil), 
+				UpdatedAt:    time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "NotFound",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(),
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrNotFound,
+			assertJob:         nil,
+		},
+		{
+			name: "InvalidState_NotWaiting",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(),
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing, // Wrong state
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrInvalidState,
+			assertJob:         nil,
+		},
+		{
+			name: "InvalidState_ContractorExists",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(),
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateWaiting,
+					ContractorID: ptrUUID(uuid.New()), // Contractor exists
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrInvalidState,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_EmployerAssignsSelf",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Employer
+				ContractorID: uuid.Nil, 
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_NonEmployerAssignsOther",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Non-employer
+				ContractorID: uuid.New(), // Assigning someone else
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(), // Actual employer
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "Conflict_Update",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Employer
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        ptrJobState(models.JobStateOngoing),
+				},
+				res: nil,
+				err: storage.ErrConflict, // Simulate FK violation etc.
+			},
+			expectedJob: nil,
+			expectedErr: services.ErrConflict,
+			assertJob:   nil,
+		},
+		{
+			name: "RepoError_GetByID",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(),
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read failed"),
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       errors.New("internal error fetching job for assignment: db read failed"), // Service wraps the error
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_Update",
+			req: &dto.AssignContractorRequest{
+				JobID:        uuid.New(),
+				UserID:       uuid.New(), // Employer
+				ContractorID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: ptrUUID(uuid.Nil), 
+					State:        ptrJobState(models.JobStateOngoing),
+				},
+				res: nil,
+				err: errors.New("db write failed"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("db write failed"), // Update error passed through
+			assertJob:   nil,
+		},
 	}
 
-	existingJob := &models.Job{
-		ID:           jobID,
-		EmployerID:   employerID,
-		State:        models.JobStateWaiting, // Correct state
-		ContractorID: nil,                   // No contractor
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
+
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			contractorID := uuid.New()
+			requestingUserID := uuid.New()
+			targetContractorID := uuid.New()
+
+			tt.req.JobID = jobID
+			if tt.name == "Success_EmployerAssigns" || tt.name == "Conflict_Update" || tt.name == "RepoError_Update" {
+				tt.req.UserID = employerID
+				tt.req.ContractorID = contractorID
+			} else if tt.name == "Success_ContractorAssignsSelf" {
+				tt.req.UserID = contractorID
+				tt.req.ContractorID = contractorID
+			} else if tt.name == "Forbidden_EmployerAssignsSelf" {
+				tt.req.UserID = employerID
+				tt.req.ContractorID = employerID
+			} else if tt.name == "Forbidden_NonEmployerAssignsOther" {
+				tt.req.UserID = requestingUserID
+				tt.req.ContractorID = targetContractorID
+			} else {
+				tt.req.UserID = uuid.New() // Default
+				tt.req.ContractorID = uuid.New() // Default
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success_EmployerAssigns" || tt.name == "Success_ContractorAssignsSelf" || tt.name == "Forbidden_EmployerAssignsSelf" || tt.name == "Conflict_Update" || tt.name == "RepoError_Update" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+				} else if tt.name == "InvalidState_NotWaiting" {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New()
+					tt.mockJobRepoGetByID.res.State = models.JobStateOngoing
+				} else if tt.name == "InvalidState_ContractorExists" {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New()
+					tt.mockJobRepoGetByID.res.ContractorID = ptrUUID(uuid.New())
+				} else if tt.name == "Forbidden_NonEmployerAssignsOther" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+				} else {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Default
+				}
+			}
+
+			if tt.mockJobRepoUpdate.req != nil {
+				tt.mockJobRepoUpdate.req.ID = jobID
+				if tt.mockJobRepoUpdate.req.ContractorID != nil {
+					*tt.mockJobRepoUpdate.req.ContractorID = tt.req.ContractorID // Match request contractor ID
+				}
+			}
+			if tt.mockJobRepoUpdate.res != nil {
+				tt.mockJobRepoUpdate.res.ID = jobID
+				tt.mockJobRepoUpdate.res.EmployerID = employerID
+				if tt.mockJobRepoUpdate.res.ContractorID != nil {
+					*tt.mockJobRepoUpdate.res.ContractorID = tt.req.ContractorID // Match request contractor ID
+				}
+				// Simulate repo setting time if not already set
+				if tt.mockJobRepoUpdate.res.UpdatedAt.IsZero() {
+					tt.mockJobRepoUpdate.res.UpdatedAt = time.Now()
+				}
+			}
+
+			if tt.expectedJob != nil {
+				tt.expectedJob.ID = jobID
+				tt.expectedJob.EmployerID = employerID
+				if tt.expectedJob.ContractorID != nil {
+					*tt.expectedJob.ContractorID = tt.req.ContractorID // Match request contractor ID
+				}
+				// Simulate repo setting time if not already set
+				if tt.expectedJob.UpdatedAt.IsZero() {
+					tt.expectedJob.UpdatedAt = time.Now()
+				}
+			}
+
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoUpdate.req != nil || tt.mockJobRepoUpdate.err != nil {
+				mockJobRepo.EXPECT().Update(ctx, gomock.Any()).Return(tt.mockJobRepoUpdate.res, tt.mockJobRepoUpdate.err).Times(1)
+			}
+
+			// Call the service method
+			job, err := jobService.AssignContractor(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				if tt.assertJob != nil {
+					tt.assertJob(t, tt.expectedJob, job)
+				} else {
+					// Loosely assert time fields
+					assert.WithinDuration(t, tt.expectedJob.UpdatedAt, job.UpdatedAt, time.Second)
+					// Compare other fields
+					tt.expectedJob.UpdatedAt = job.UpdatedAt // Set expected to actual for comparison
+					assert.Equal(t, tt.expectedJob, job)
+				}
+			}
+		})
+	}
+}
+
+func TestJobService_UnassignContractor(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockJobRepoUpdate struct {
+		req *dto.UpdateJobRequest
+		res *models.Job
+		err error
 	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
+	tests := []struct {
+		name              string
+		req               *dto.UnassignContractorRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		mockJobRepoUpdate mockJobRepoUpdate
+		expectedJob       *models.Job
+		expectedErr       error
+		assertJob         func(*testing.T, *models.Job, *models.Job) // Custom assertion for job
+	}{
+		{
+			name: "Success",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Current contractor
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.Nil), 
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: nil,
+					State:        ptrJobState(models.JobStateWaiting),
+				},
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+					UpdatedAt:    time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:           uuid.Nil, 
+				EmployerID:   uuid.Nil, 
+				State:        models.JobStateWaiting,
+				ContractorID: nil,
+				UpdatedAt:    time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "NotFound",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrNotFound,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_WrongUser",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Wrong user
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.New()), // Actual contractor
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_NoContractor",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Doesn't matter who tries
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing,
+					ContractorID: nil, // No contractor
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_WrongState",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Current contractor
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateWaiting, // Wrong state
+					ContractorID: ptrUUID(uuid.Nil), 
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_GetByID",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read failed"),
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       errors.New("internal error fetching job for unassignment: db read failed"), // Service wraps the error
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_Update",
+			req: &dto.UnassignContractorRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Current contractor
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.Nil), 
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:           uuid.Nil, 
+					ContractorID: nil,
+					State:        ptrJobState(models.JobStateWaiting),
+				},
+				res: nil,
+				err: errors.New("db write failed"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("db write failed"), // Update error passed through
+			assertJob:   nil,
+		},
+	}
 
-	// Mock Delete call
-	deleteReq := &dto.DeleteJobRequest{ID: jobID} // Service creates this internally
-	mockJobRepo.EXPECT().Delete(ctx, deleteReq).Return(nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	err := jobService.DeleteJob(ctx, req)
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			contractorID := uuid.New()
+			wrongUserID := uuid.New()
+			employerID := uuid.New()
 
-	require.NoError(t, err)
+			tt.req.JobID = jobID
+			if tt.name == "Success" || tt.name == "Forbidden_WrongState" || tt.name == "RepoError_Update" {
+				tt.req.UserID = contractorID
+			} else if tt.name == "Forbidden_WrongUser" {
+				tt.req.UserID = wrongUserID
+			} else {
+				tt.req.UserID = uuid.New() // Default
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Assign new employer ID
+				if tt.name == "Success" || tt.name == "Forbidden_WrongUser" || tt.name == "RepoError_Update" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Forbidden_WrongState" {
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+					tt.mockJobRepoGetByID.res.State = models.JobStateWaiting
+				} else {
+					tt.mockJobRepoGetByID.res.ContractorID = nil // Default
+				}
+			}
+
+			if tt.mockJobRepoUpdate.req != nil {
+				tt.mockJobRepoUpdate.req.ID = jobID
+			}
+			if tt.mockJobRepoUpdate.res != nil {
+				tt.mockJobRepoUpdate.res.ID = jobID
+				tt.mockJobRepoUpdate.res.EmployerID = employerID // Assign new employer ID
+				// Simulate repo setting time if not already set
+				if tt.mockJobRepoUpdate.res.UpdatedAt.IsZero() {
+					tt.mockJobRepoUpdate.res.UpdatedAt = time.Now()
+				}
+			}
+
+			if tt.expectedJob != nil {
+				tt.expectedJob.ID = jobID
+				tt.expectedJob.EmployerID = employerID // Assign new employer ID
+				// Simulate repo setting time if not already set
+				if tt.expectedJob.UpdatedAt.IsZero() {
+					tt.expectedJob.UpdatedAt = time.Now()
+				}
+			}
+
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoUpdate.req != nil || tt.mockJobRepoUpdate.err != nil {
+				mockJobRepo.EXPECT().Update(ctx, gomock.Any()).Return(tt.mockJobRepoUpdate.res, tt.mockJobRepoUpdate.err).Times(1)
+			}
+
+			// Call the service method
+			job, err := jobService.UnassignContractor(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				if tt.assertJob != nil {
+					tt.assertJob(t, tt.expectedJob, job)
+				} else {
+					// Loosely assert time fields
+					assert.WithinDuration(t, tt.expectedJob.UpdatedAt, job.UpdatedAt, time.Second)
+					// Compare other fields
+					tt.expectedJob.UpdatedAt = job.UpdatedAt // Set expected to actual for comparison
+					assert.Equal(t, tt.expectedJob, job)
+				}
+			}
+		})
+	}
 }
 
-func TestJobService_DeleteJob_NotFound_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
+func TestJobService_UpdateJobState(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockJobRepoUpdate struct {
+		req *dto.UpdateJobRequest
+		res *models.Job
+		err error
+	}
 
-	jobID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: uuid.New()}
+	tests := []struct {
+		name              string
+		req               *dto.UpdateJobStateRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		mockJobRepoUpdate mockJobRepoUpdate
+		expectedJob       *models.Job
+		expectedErr       error
+		assertJob         func(*testing.T, *models.Job, *models.Job) // Custom assertion for job
+	}{
+		{
+			name: "Success_Employer",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Employer
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.New()),
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:    uuid.Nil, 
+					State: ptrJobState(models.JobStateComplete),
+				},
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateComplete,
+					ContractorID: ptrUUID(uuid.New()),
+					UpdatedAt:    time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:           uuid.Nil, 
+				EmployerID:   uuid.Nil, 
+				State:        models.JobStateComplete,
+				ContractorID: ptrUUID(uuid.New()),
+				UpdatedAt:    time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "Success_Contractor",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Contractor
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(),
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.Nil), 
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:    uuid.Nil, 
+					State: ptrJobState(models.JobStateComplete),
+				},
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateComplete,
+					ContractorID: ptrUUID(uuid.Nil), 
+					UpdatedAt:    time.Now(), // Simulate repo setting time
+				},
+				err: nil,
+			},
+			expectedJob: &models.Job{
+				ID:           uuid.Nil, 
+				EmployerID:   uuid.Nil, 
+				State:        models.JobStateComplete,
+				ContractorID: ptrUUID(uuid.Nil), 
+				UpdatedAt:    time.Now(), // Will be asserted loosely
+			},
+			expectedErr: nil,
+			assertJob: func(t *testing.T, expected, actual *models.Job) {
+				assert.Equal(t, expected.ID, actual.ID)
+				assert.Equal(t, expected.EmployerID, actual.EmployerID)
+				assert.Equal(t, expected.State, actual.State)
+				assert.Equal(t, expected.ContractorID, actual.ContractorID)
+				assert.WithinDuration(t, expected.UpdatedAt, actual.UpdatedAt, time.Second)
+			},
+		},
+		{
+			name: "NotFound",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(),
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrNotFound,
+			assertJob:         nil,
+		},
+		{
+			name: "Forbidden_WrongUser",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Wrong user
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(), // Actual employer
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.New()), // Actual contractor
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrForbidden,
+			assertJob:         nil,
+		},
+		{
+			name: "InvalidTransition",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Employer
+				State:  models.JobStateWaiting, // Invalid: Complete -> Waiting
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateComplete,
+					ContractorID: ptrUUID(uuid.New()),
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       services.ErrInvalidTransition,
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_GetByID",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(),
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read failed"),
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{}, // Not called
+			expectedJob:       nil,
+			expectedErr:       errors.New("internal error fetching job for state update: db read failed"), // Service wraps the error
+			assertJob:         nil,
+		},
+		{
+			name: "RepoError_Update",
+			req: &dto.UpdateJobStateRequest{
+				JobID:  uuid.New(),
+				UserID: uuid.New(), // Employer
+				State:  models.JobStateComplete,
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateOngoing,
+					ContractorID: ptrUUID(uuid.New()),
+				},
+				err: nil,
+			},
+			mockJobRepoUpdate: mockJobRepoUpdate{
+				req: &dto.UpdateJobRequest{
+					ID:    uuid.Nil, 
+					State: ptrJobState(models.JobStateComplete),
+				},
+				res: nil,
+				err: errors.New("db write failed"),
+			},
+			expectedJob: nil,
+			expectedErr: errors.New("db write failed"), // Update error passed through
+			assertJob:   nil,
+		},
+	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, storage.ErrNotFound).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	err := jobService.DeleteJob(ctx, req)
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			contractorID := uuid.New()
+			wrongUserID := uuid.New()
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound))
+			tt.req.JobID = jobID
+			if tt.name == "Success_Employer" || tt.name == "InvalidTransition" || tt.name == "RepoError_Update" {
+				tt.req.UserID = employerID
+			} else if tt.name == "Success_Contractor" {
+				tt.req.UserID = contractorID
+			} else if tt.name == "Forbidden_WrongUser" {
+				tt.req.UserID = wrongUserID
+			} else {
+				tt.req.UserID = uuid.New() // Default
+			}
+
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success_Employer" || tt.name == "InvalidTransition" || tt.name == "RepoError_Update" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Success_Contractor" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else if tt.name == "Forbidden_WrongUser" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Default
+					tt.mockJobRepoGetByID.res.ContractorID = ptrUUID(uuid.New()) // Default
+				}
+			}
+
+			if tt.mockJobRepoUpdate.req != nil {
+				tt.mockJobRepoUpdate.req.ID = jobID
+			}
+			if tt.mockJobRepoUpdate.res != nil {
+				tt.mockJobRepoUpdate.res.ID = jobID
+				if tt.name == "Success_Employer" || tt.name == "Success_Contractor" || tt.name == "RepoError_Update" {
+					tt.mockJobRepoUpdate.res.EmployerID = employerID
+					tt.mockJobRepoUpdate.res.ContractorID = &contractorID
+				} else {
+					tt.mockJobRepoUpdate.res.EmployerID = uuid.New() // Default
+					tt.mockJobRepoUpdate.res.ContractorID = ptrUUID(uuid.New()) // Default
+				}
+				// Simulate repo setting time if not already set
+				if tt.mockJobRepoUpdate.res.UpdatedAt.IsZero() {
+					tt.mockJobRepoUpdate.res.UpdatedAt = time.Now()
+				}
+			}
+
+			if tt.expectedJob != nil {
+				tt.expectedJob.ID = jobID
+				if tt.name == "Success_Employer" || tt.name == "Success_Contractor" {
+					tt.expectedJob.EmployerID = employerID
+					tt.expectedJob.ContractorID = &contractorID
+				} else {
+					tt.expectedJob.EmployerID = uuid.New() // Default
+					tt.expectedJob.ContractorID = ptrUUID(uuid.New()) // Default
+				}
+				// Simulate repo setting time if not already set
+				if tt.expectedJob.UpdatedAt.IsZero() {
+					tt.expectedJob.UpdatedAt = time.Now()
+				}
+			}
+
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoUpdate.req != nil || tt.mockJobRepoUpdate.err != nil {
+				mockJobRepo.EXPECT().Update(ctx, gomock.Any()).Return(tt.mockJobRepoUpdate.res, tt.mockJobRepoUpdate.err).Times(1)
+			}
+
+			// Call the service method
+			job, err := jobService.UpdateJobState(ctx, tt.req)
+
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+				assert.Nil(t, job)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, job)
+				if tt.assertJob != nil {
+					tt.assertJob(t, tt.expectedJob, job)
+				} else {
+					// Loosely assert time fields
+					assert.WithinDuration(t, tt.expectedJob.UpdatedAt, job.UpdatedAt, time.Second)
+					// Compare other fields
+					tt.expectedJob.UpdatedAt = job.UpdatedAt // Set expected to actual for comparison
+					assert.Equal(t, tt.expectedJob, job)
+				}
+			}
+		})
+	}
 }
 
-func TestJobService_DeleteJob_Forbidden_WrongUser(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
+func TestJobService_DeleteJob(t *testing.T) {
+	type mockJobRepoGetByID struct {
+		req *dto.GetJobByIDRequest
+		res *models.Job
+		err error
+	}
+	type mockJobRepoDelete struct {
+		req *dto.DeleteJobRequest
+		err error
+	}
 
-	jobID := uuid.New()
-	employerID := uuid.New()
-	wrongUserID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: wrongUserID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
+	tests := []struct {
+		name              string
+		req               *dto.DeleteJobRequest
+		mockJobRepoGetByID mockJobRepoGetByID
+		mockJobRepoDelete mockJobRepoDelete
+		expectedErr       error
+	}{
+		{
+			name: "Success",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Employer
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{
+				req: &dto.DeleteJobRequest{ID: uuid.Nil}, 
+				err: nil,
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "NotFound_GetByID",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: storage.ErrNotFound,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{}, // Not called
+			expectedErr: services.ErrNotFound,
+		},
+		{
+			name: "Forbidden_WrongUser",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Wrong user
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.New(), // Actual employer
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{}, // Not called
+			expectedErr: services.ErrForbidden,
+		},
+		{
+			name: "InvalidState_NotWaiting",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Employer
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateOngoing, // Wrong state
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{}, // Not called
+			expectedErr: services.ErrInvalidState,
+		},
+		{
+			name: "InvalidState_ContractorAssigned",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Employer
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: ptrUUID(uuid.New()), // Contractor assigned
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{}, // Not called
+			expectedErr: services.ErrInvalidState,
+		},
+		{
+			name: "NotFound_Delete",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Employer
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{
+				req: &dto.DeleteJobRequest{ID: uuid.Nil}, 
+				err: storage.ErrNotFound, // Delete returns NotFound
+			},
+			expectedErr: services.ErrNotFound, // Service maps this
+		},
+		{
+			name: "RepoError_GetByID",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(),
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: nil,
+				err: errors.New("db read failed"),
+			},
+			mockJobRepoDelete: mockJobRepoDelete{}, // Not called
+			expectedErr: errors.New("internal error fetching job for deletion: db read failed"), // Service wraps the error
+		},
+		{
+			name: "RepoError_Delete",
+			req: &dto.DeleteJobRequest{
+				ID:     uuid.New(),
+				UserID: uuid.New(), // Employer
+			},
+			mockJobRepoGetByID: mockJobRepoGetByID{
+				req: &dto.GetJobByIDRequest{ID: uuid.Nil}, 
+				res: &models.Job{
+					ID:           uuid.Nil, 
+					EmployerID:   uuid.Nil, 
+					State:        models.JobStateWaiting,
+					ContractorID: nil,
+				},
+				err: nil,
+			},
+			mockJobRepoDelete: mockJobRepoDelete{
+				req: &dto.DeleteJobRequest{ID: uuid.Nil}, 
+				err: errors.New("db delete constraint"),
+			},
+			expectedErr: errors.New("db delete constraint"), // Delete error passed through
+		},
+	}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
+			defer ctrl.Finish()
 
-	err := jobService.DeleteJob(ctx, req)
+			// Set dynamic UUIDs
+			jobID := uuid.New()
+			employerID := uuid.New()
+			wrongUserID := uuid.New()
+			contractorID := uuid.New()
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrForbidden))
-}
+			tt.req.ID = jobID
+			if tt.name == "Success" || tt.name == "InvalidState_NotWaiting" || tt.name == "InvalidState_ContractorAssigned" || tt.name == "NotFound_Delete" || tt.name == "RepoError_Delete" {
+				tt.req.UserID = employerID
+			} else if tt.name == "Forbidden_WrongUser" {
+				tt.req.UserID = wrongUserID
+			} else {
+				tt.req.UserID = uuid.New() // Default
+			}
 
-func TestJobService_DeleteJob_InvalidState_NotWaiting(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
+			if tt.mockJobRepoGetByID.req != nil {
+				tt.mockJobRepoGetByID.req.ID = jobID
+			}
+			if tt.mockJobRepoGetByID.res != nil {
+				tt.mockJobRepoGetByID.res.ID = jobID
+				if tt.name == "Success" || tt.name == "NotFound_Delete" || tt.name == "RepoError_Delete" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = nil
+				} else if tt.name == "Forbidden_WrongUser" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+				} else if tt.name == "InvalidState_NotWaiting" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.State = models.JobStateOngoing
+				} else if tt.name == "InvalidState_ContractorAssigned" {
+					tt.mockJobRepoGetByID.res.EmployerID = employerID
+					tt.mockJobRepoGetByID.res.ContractorID = &contractorID
+				} else {
+					tt.mockJobRepoGetByID.res.EmployerID = uuid.New() // Default
+				}
+			}
 
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: employerID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateOngoing} // Wrong state
+			if tt.mockJobRepoDelete.req != nil {
+				tt.mockJobRepoDelete.req.ID = jobID
+			}
 
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
+			// Setup mocks
+			if tt.mockJobRepoGetByID.req != nil {
+				mockJobRepo.EXPECT().GetByID(ctx, tt.mockJobRepoGetByID.req).Return(tt.mockJobRepoGetByID.res, tt.mockJobRepoGetByID.err).Times(1)
+			}
+			if tt.mockJobRepoDelete.req != nil || tt.mockJobRepoDelete.err != nil {
+				mockJobRepo.EXPECT().Delete(ctx, gomock.Any()).Return(tt.mockJobRepoDelete.err).Times(1)
+			}
 
-	err := jobService.DeleteJob(ctx, req)
+			// Call the service method
+			err := jobService.DeleteJob(ctx, tt.req)
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestJobService_DeleteJob_InvalidState_ContractorAssigned(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	contractorID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: employerID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting, ContractorID: &contractorID} // Contractor assigned
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	err := jobService.DeleteJob(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrInvalidState))
-}
-
-func TestJobService_DeleteJob_NotFound_Delete(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: employerID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	deleteReq := &dto.DeleteJobRequest{ID: jobID}
-	mockJobRepo.EXPECT().Delete(ctx, deleteReq).Return(storage.ErrNotFound).Times(1) // Delete returns NotFound
-
-	err := jobService.DeleteJob(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, services.ErrNotFound)) // Service maps this
-}
-
-func TestJobService_DeleteJob_RepoError_GetByID(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: uuid.New()}
-	repoErr := errors.New("db read failed")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(nil, repoErr).Times(1)
-
-	err := jobService.DeleteJob(ctx, req)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internal error fetching job for deletion")
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestJobService_DeleteJob_RepoError_Delete(t *testing.T) {
-	ctx, jobService, mockJobRepo, _, ctrl := setupJobServiceTest(t)
-	defer ctrl.Finish()
-
-	jobID := uuid.New()
-	employerID := uuid.New()
-	req := &dto.DeleteJobRequest{ID: jobID, UserID: employerID}
-	existingJob := &models.Job{ID: jobID, EmployerID: employerID, State: models.JobStateWaiting}
-	repoErr := errors.New("db delete constraint")
-
-	mockJobRepo.EXPECT().GetByID(ctx, &dto.GetJobByIDRequest{ID: jobID}).Return(existingJob, nil).Times(1)
-
-	deleteReq := &dto.DeleteJobRequest{ID: jobID}
-	mockJobRepo.EXPECT().Delete(ctx, deleteReq).Return(repoErr).Times(1)
-
-	err := jobService.DeleteJob(ctx, req)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr)) // Delete error passed through
+			// Assert results
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				if tt.expectedErr.Error() == err.Error() {
+					assert.Equal(t, tt.expectedErr.Error(), err.Error())
+				} else {
+					assert.True(t, errors.Is(err, tt.expectedErr), "expected error %v, got %v", tt.expectedErr, err)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

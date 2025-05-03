@@ -10,3 +10,4 @@ database:
 
 jwt:
   expiration_minutes: 60 # Default token expiration in minutes (can be overridden by env var)
+  refresh_expiration: 24

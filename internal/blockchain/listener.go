@@ -315,4 +315,9 @@ func (l *EventListener) handleAnswerUpdated(vLog types.Log) {
 	fmt.Printf("==> ACTION: Handle %s Event - Price: %s, Time: %s\n",
 		eventName, eventData.Current.String(), eventData.UpdatedAt.String())
 
+
+	// If we have payments through a smart contract for example, we could automatically update invoice state based on on-chain events
+	// Check a specific event with the topic InvoicePayment for example
+	// Either the event would have an invoice ID associated or we use the wallets involved in the transaction
+	// Contractor or Employer would have their own wallets and we could check the event for those
 }
