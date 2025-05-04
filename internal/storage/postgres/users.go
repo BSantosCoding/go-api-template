@@ -19,7 +19,7 @@ import (
 
 // UserRepo implements the storage.UserRepository interface using PostgreSQL.
 type UserRepo struct {
-	db *pgxpool.Pool
+	db Querier
 }
 
 // NewUserRepo creates a new UserRepo.
@@ -27,11 +27,16 @@ func NewUserRepo(db *pgxpool.Pool) *UserRepo {
 	return &UserRepo{db: db}
 }
 
+// WithTx creates a new UserRepo with the transaction.
+func (r *UserRepo) WithTx(tx pgx.Tx) storage.UserRepository {
+	return &UserRepo{db: tx}
+}
+
 // Compile-time check to ensure UserRepo implements UserRepository
 var _ storage.UserRepository = (*UserRepo)(nil)
 
 func (r *UserRepo) GetAll(ctx context.Context) ([]models.User, error) {
-	query := `SELECT id, name, email FROM users ORDER BY name ASC;`
+	query := `SELECT id, name, email, created_at, updated_at FROM users ORDER BY name ASC;` // Select needed fields
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		log.Printf("Error querying all users: %v\n", err)
@@ -39,7 +44,13 @@ func (r *UserRepo) GetAll(ctx context.Context) ([]models.User, error) {
 	}
 	defer rows.Close()
 
-	users, err := pgx.CollectRows(rows, pgx.RowToStructByName[models.User])
+	// Scan manually or use RowToStructByName if all struct fields are selected
+	users, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.User, error) {
+		var u models.User
+		// Explicitly scan only the selected columns
+		err := row.Scan(&u.ID, &u.Name, &u.Email, &u.CreatedAt, &u.UpdatedAt)
+		return u, err
+	})
 	if err != nil {
 		log.Printf("Error scanning users: %v\n", err)
 		return nil, err
@@ -160,6 +171,10 @@ func (r *UserRepo) Update(ctx context.Context, user *dto.UpdateUserRequest) (*mo
         &updatedUser.UpdatedAt, // This will contain the trigger-set value
     )
 	if err != nil {
+		// Check specifically for ErrNoRows on UPDATE...RETURNING
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, storage.ErrNotFound
+		}
 		// Check for unique constraint violation on update (e.g., email)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {

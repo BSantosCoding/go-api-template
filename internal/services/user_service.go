@@ -11,10 +11,12 @@ import (
 
 	"go-api-template/internal/models"
 	"go-api-template/internal/storage"
+	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -30,16 +32,18 @@ type userService struct {
 	jwtSecret     string
 	jwtExpiration time.Duration
 	refreshTokenExpiration time.Duration
+	db            *pgxpool.Pool // Add DB pool for transactions
 }
 
 // NewUserService creates a new instance of UserService.
-func NewUserService(repo storage.UserRepository, redisClient *redis.Client, jwtSecret string, jwtExpiration, refreshTokenExpiration time.Duration) UserService {
-	return &userService{
-		repo:          repo,
+func NewUserService(redisClient *redis.Client, jwtSecret string, jwtExpiration, refreshTokenExpiration time.Duration, db *pgxpool.Pool) UserService {
+	return &userService{ // Add db to the struct initialization
+		repo:          postgres.NewUserRepo(db),
 		redisClient: redisClient,
 		jwtSecret:     jwtSecret,
 		jwtExpiration: jwtExpiration,
 		refreshTokenExpiration: refreshTokenExpiration,
+		db: db,
 	}
 }
 
@@ -172,9 +176,39 @@ func (s *userService) GetByEmail(ctx context.Context, req *dto.GetUserByEmailReq
 }
 
 func (s *userService) Update(ctx context.Context, req *dto.UpdateUserRequest) (*models.User, error) {
-	//Authenticate the user
-	
-	return s.repo.Update(ctx, req)
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		log.Printf("UserService.Update: Error beginning transaction: %v", err)
+		return nil, fmt.Errorf("internal error starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	// Use transaction-aware repository
+	txUserRepo := s.repo.WithTx(tx)
+	// --- End Transaction Setup ---
+
+	// Optional: Fetch user first if you need to perform checks before update
+	// getReq := dto.GetUserByIdRequest{ID: req.ID}
+	// _, err = txUserRepo.GetByID(ctx, &getReq)
+	// if err != nil {
+	//     return nil, mapRepoError(err, "getting user for update check")
+	// }
+	// Add authorization checks here if needed (already done in handler, but could be double-checked)
+
+	updatedUser, err := txUserRepo.Update(ctx, req) // Use txUserRepo
+	if err != nil {
+		return nil, mapRepoError(err, "updating user")
+	}
+
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("UserService.Update: Error committing transaction: %v", err)
+		return nil, fmt.Errorf("internal error committing user update: %w", err)
+	}
+	// --- End Transaction ---
+
+	return updatedUser, nil
 }
 
 func (s *userService) Delete(ctx context.Context, req *dto.DeleteUserRequest) error {

@@ -71,13 +71,6 @@ type UpdateJobDetailsRequest struct {
 	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 
-// AssignContractorRequest defines the structure for assigning a contractor.
-type AssignContractorRequest struct {
-	ContractorID uuid.UUID `json:"contractor_id" validate:"required,uuid"`
-	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
-	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
-}
-
 // UpdateJobStateRequest defines the structure for updating the job state.
 type UpdateJobStateRequest struct {
 	State models.JobState `json:"state" validate:"required,oneof=Waiting Ongoing Complete Archived"`
@@ -88,12 +81,6 @@ type UpdateJobStateRequest struct {
 // DeleteJobRequest defines the structure for deleting a job.
 type DeleteJobRequest struct {
 	ID uuid.UUID `json:"-" validate:"required,uuid"`
-	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
-}
-
-// UnassignContractorRequest defines the structure for unassigning a contractor.
-type UnassignContractorRequest struct {
-	JobID uuid.UUID `json:"-"` // Set internally by handler from auth context
 	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 
@@ -111,4 +98,3 @@ type JobResponse struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 	// Consider adding Employer/Contractor details (names/emails) if needed
 }
-

@@ -23,10 +23,7 @@ func RegisterJobRoutes(
 		jobs.GET("/my/contractor", jobHandler.ListContractorJobs) // List jobs taken by the authenticated contractor
 		jobs.GET("/:id", jobHandler.GetJobByID)          // Get a specific job by ID
 		jobs.PATCH("/:id/details", jobHandler.UpdateJobDetails)     // Update Rate/Duration
-		jobs.PUT("/:id/contractor", jobHandler.AssignContractor)    // Assign Contractor (PUT is suitable for replacing/setting the contractor)
-		jobs.DELETE("/:id/contractor", jobHandler.UnassignContractor) // Unassign Contractor (DELETE is suitable)
 		jobs.PATCH("/:id/state", jobHandler.UpdateJobState) 
 		jobs.DELETE("/:id", jobHandler.DeleteJob)        // Delete a job
 	}
 }
-

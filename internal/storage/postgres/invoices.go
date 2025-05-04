@@ -21,12 +21,17 @@ import (
 
 // InvoiceRepo implements the storage.InvoiceRepository interface using PostgreSQL.
 type InvoiceRepo struct {
-	db *pgxpool.Pool
+	db Querier
 }
 
 // NewInvoiceRepo creates a new InvoiceRepo.
 func NewInvoiceRepo(db *pgxpool.Pool) *InvoiceRepo {
 	return &InvoiceRepo{db: db}
+}
+
+// WithTx creates a new InvoiceRepo with the transaction.
+func (r *InvoiceRepo) WithTx(tx pgx.Tx) storage.InvoiceRepository {
+	return &InvoiceRepo{db: tx}
 }
 
 // Compile-time check to ensure InvoiceRepo implements InvoiceRepository

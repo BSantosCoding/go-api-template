@@ -18,29 +18,16 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 
 # Phony targets (targets that don't represent files)
 .PHONY: help \
-	migrate-create migrate-up migrate-down migrate-down-all migrate-force migrate-status \
+	migrate-create migrate-up migrate-down migrate-down-all migrate-force migrate-status migrate-test-up \
 	swagger-gen dev test \
 	install-migrate install-swag install-air \
-	check-migrate check-swag check-air check-db-url \
+	check-migrate check-swag check-air check-db-url check-test-db-url \
 	docker-build docker-build-nocache docker-up docker-down docker-stop docker-logs docker-logs-api docker-logs-db docker-exec-api \
 	docker-migrate-up docker-migrate-down docker-migrate-status docker-migrate-force docker-db-reset \
 	mocks clean-mocks
 
 # Default target when running 'make'
 .DEFAULT_GOAL := help
-
-help: ## Display this help screen
-	@echo "Usage: make <command>"
-	@echo ""
-	@echo "Available migration commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-	@echo ""
-	@echo "Available development commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-	@echo ""
-	@echo "Available tool commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'install-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
 
 # --- Development Targets ---
 
@@ -54,13 +41,13 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 	@$(SWAG_CMD) init -g main.go # Specify main go file explicitly
 	@echo "Swagger documentation generated in ./docs directory."
 
-test: ## Run all Go unit and integration tests
+test: ## Run all Service Integration tests 
+	@echo "Running Redis test instance..."
+	@docker run --name test-redis -d -p 6379:6379 redis:alpine
 	@echo "Running Go tests..."
 	@go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
 	@echo "Generating HTML coverage report..."
 	@go tool cover -html=coverage.out -o coverage.html
-
-
 
 # --- Migration Commands ---
 
@@ -106,6 +93,11 @@ migrate-status: check-migrate check-db-url ## Show current migration status and 
 	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) version
 	@echo "--- Status ---"
 	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) status || true # Allow non-zero exit if dirty/no migrations table
+
+migrate-test-up: check-migrate check-test-db-url ## Apply all 'up' migrations to the TEST database
+	@echo "Applying migrations to TEST database from $(MIGRATIONS_DIR)..."
+	@$(MIGRATE_CMD) -database "$(TEST_DATABASE_URL)" -path $(MIGRATIONS_DIR) up
+	@echo "Test database migrations applied."
 
 
 # --- Tool Installation ---
@@ -291,6 +283,13 @@ check-db-url:
 		echo "Warning: Host DATABASE_URL not set (needed for local 'make migrate-*')."; \
 	fi
 
+check-test-db-url: ## Check if TEST_DATABASE_URL is set
+	@if [ -z "$(TEST_DATABASE_URL)" ]; then \
+		echo "Error: TEST_DATABASE_URL environment variable is not set."; \
+		echo "       Please define it in .env or your environment for integration tests."; \
+		exit 1; \
+	fi
+
 # --- Mocks for testing ---
 
 # Generate mocks for repositories and services
@@ -316,7 +315,7 @@ help: ## Display this help screen
 	@echo "Usage: make <command>"
 	@echo ""
 	@echo "Available migration commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | grep -v 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' # Show local migrate commands
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | grep -v 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Available development commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen|test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'

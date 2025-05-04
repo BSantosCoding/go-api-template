@@ -2,25 +2,26 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 
 	"go-api-template/internal/models"
 	"go-api-template/internal/storage"
+	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type jobService struct {
 	jobRepo storage.JobRepository
 	userRepo storage.UserRepository
+	db      *pgxpool.Pool // Add DB pool for transactions
 }
 
 // NewJobService creates a new instance of JobService.
-func NewJobService(jobRepo storage.JobRepository, userRepo storage.UserRepository) JobService {
-	return &jobService{jobRepo: jobRepo, userRepo: userRepo}
+func NewJobService(db *pgxpool.Pool) JobService {
+	return &jobService{jobRepo: postgres.NewJobRepo(db), userRepo: postgres.NewUserRepo(db), db: db}
 }
 
 func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (*models.Job, error) {
@@ -29,7 +30,7 @@ func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (
 	job, err := s.jobRepo.Create(ctx, req)
 	if err != nil {
 		log.Printf("JobService: Error creating job: %v", err)
-		// Map storage errors if necessary, otherwise return generic internal error
+		// Map storage errors if necessary (e.g., ErrConflict for FK violation)
 		return nil, fmt.Errorf("internal error creating job: %w", err)
 	}
 	return job, nil
@@ -37,12 +38,9 @@ func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (
 
 func (s *jobService) GetJobByID(ctx context.Context, req *dto.GetJobByIDRequest) (*models.Job, error) {
 	job, err := s.jobRepo.GetByID(ctx, req)
-	if errors.Is(err, storage.ErrNotFound) {
-		return nil, ErrNotFound
-	}
 	if err != nil {
 		log.Printf("JobService: Error getting job %s: %v", req.ID, err)
-		return nil, fmt.Errorf("internal error getting job: %w", err)
+		return nil, mapRepoError(err, "getting job by ID")
 	}
 	return job, nil
 }
@@ -77,14 +75,23 @@ func (s *jobService) ListJobsByContractor(ctx context.Context, req *dto.ListJobs
 }
 
 func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDetailsRequest) (*models.Job, error) {
-	getReq := dto.GetJobByIDRequest{ID: req.JobID}
-	existingJob, err := s.jobRepo.GetByID(ctx, &getReq)
-	if errors.Is(err, storage.ErrNotFound) {
-		return nil, ErrNotFound
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		log.Printf("UpdateJobDetails: Error beginning transaction: %v", err)
+		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	// Use transaction-aware repository
+	txJobRepo := s.jobRepo.WithTx(tx)
+	// --- End Transaction Setup ---
+
+	getReq := dto.GetJobByIDRequest{ID: req.JobID}
+	existingJob, err := txJobRepo.GetByID(ctx, &getReq) // Use txJobRepo
 	if err != nil {
 		log.Printf("UpdateJobDetails: Error fetching job %s: %v", req.JobID, err)
-		return nil, fmt.Errorf("internal error fetching job for update: %w", err)
+		return nil, mapRepoError(err, "fetching job for update")
 	}
 
 	// Authorization & State Check
@@ -98,91 +105,35 @@ func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDet
 		Rate:     req.Rate,
 		Duration: req.Duration,
 	}
-	return s.jobRepo.Update(ctx, &updateRepoReq) // Handle potential repo errors (NotFound, Conflict)
-}
-
-func (s *jobService) AssignContractor(ctx context.Context, req *dto.AssignContractorRequest) (*models.Job, error) {
-	getReq := dto.GetJobByIDRequest{ID: req.JobID}
-	existingJob, err := s.jobRepo.GetByID(ctx, &getReq)
-	if errors.Is(err, storage.ErrNotFound) {
-		return nil, ErrNotFound
-	}
+	updatedJob, err := txJobRepo.Update(ctx, &updateRepoReq) // Use txJobRepo
 	if err != nil {
-		log.Printf("AssignContractor: Error fetching job %s: %v", req.JobID, err)
-		return nil, fmt.Errorf("internal error fetching job for assignment: %w", err)
+		log.Printf("UpdateJobDetails: Error updating job %s in repo: %v", req.JobID, err)
+		return nil, mapRepoError(err, "updating job details")
 	}
 
-	// Authorization: Job state and contractor status
-	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
-		log.Printf("AssignContractor: Invalid state attempt on job %s in state %s with contractor %v", req.JobID, existingJob.State, existingJob.ContractorID)
-		return nil, ErrInvalidState
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("UpdateJobDetails: Error committing transaction: %v", err)
+		return nil, fmt.Errorf("internal error committing changes: %w", err)
 	}
-
-	// Authorization: Role check
-	isEmployer := existingJob.EmployerID == req.UserID
-	isAssigningSelf := req.ContractorID == req.UserID
-	if isEmployer {
-		if isAssigningSelf {
-			return nil, fmt.Errorf("%w: employer cannot assign themselves", ErrForbidden)
-		}
-		// Potentially check if req.ContractorID is a valid user ID
-	} else { // User is not the employer, must be assigning self
-		if !isAssigningSelf {
-			return nil, fmt.Errorf("%w: you can only assign yourself", ErrForbidden)
-		}
-	}
-
-	contractorID := req.ContractorID
-	ongoingState := models.JobStateOngoing // Assigning moves state to Ongoing
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:           req.JobID,
-		ContractorID: &contractorID,
-		State:        &ongoingState,
-	}
-
-	updatedJob, err := s.jobRepo.Update(ctx, &updateRepoReq)
-	if errors.Is(err, storage.ErrConflict) { // e.g., invalid contractor ID FK
-		return nil, fmt.Errorf("%w: invalid contractor ID", ErrConflict)
-	}
-	return updatedJob, err // Handle other repo errors (NotFound)
-}
-
-func (s *jobService) UnassignContractor(ctx context.Context, req *dto.UnassignContractorRequest) (*models.Job, error) {
-	getReq := dto.GetJobByIDRequest{ID: req.JobID}
-	existingJob, err := s.jobRepo.GetByID(ctx, &getReq)
-	if errors.Is(err, storage.ErrNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		log.Printf("UnassignContractor: Error fetching job %s: %v", req.JobID, err)
-		return nil, fmt.Errorf("internal error fetching job for unassignment: %w", err)
-	}
-
-	// Authorization check: Must be the current contractor and job must be Ongoing
-	if !(existingJob.ContractorID != nil && *existingJob.ContractorID == req.UserID && existingJob.State == models.JobStateOngoing) {
-		log.Printf("UnassignContractor: Forbidden attempt on job %s by user %s. State: %s, Current Contractor: %v", req.JobID, req.UserID, existingJob.State, existingJob.ContractorID)
-		return nil, ErrForbidden // Or ErrInvalidState
-	}
-
-	var nilUUID *uuid.UUID
-	waitingState := models.JobStateWaiting // Unassigning reverts state to Waiting
-	updateRepoReq := dto.UpdateJobRequest{
-		ID:           req.JobID,
-		ContractorID: nilUUID,
-		State:        &waitingState,
-	}
-	return s.jobRepo.Update(ctx, &updateRepoReq) // Handle repo errors
+	// --- End Transaction ---
+	return updatedJob, nil
 }
 
 func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobStateRequest) (*models.Job, error) {
-	getReq := dto.GetJobByIDRequest{ID: req.JobID}
-	existingJob, err := s.jobRepo.GetByID(ctx, &getReq)
-	if errors.Is(err, storage.ErrNotFound) {
-		return nil, ErrNotFound
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		log.Printf("UpdateJobState: Error beginning transaction: %v", err)
+		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	getReq := dto.GetJobByIDRequest{ID: req.JobID}
+	existingJob, err := s.jobRepo.WithTx(tx).GetByID(ctx, &getReq) // Use tx repo
 	if err != nil {
 		log.Printf("UpdateJobState: Error fetching job %s: %v", req.JobID, err)
-		return nil, fmt.Errorf("internal error fetching job for state update: %w", err)
+		return nil, mapRepoError(err, "fetching job for state update")
 	}
 
 	// Authorization check
@@ -191,6 +142,12 @@ func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobState
 	if !(isEmployer || isCurrentContractor) {
 		log.Printf("UpdateJobState: Forbidden attempt on job %s by user %s. Role: Employer=%t, Contractor=%t", req.JobID, req.UserID, isEmployer, isCurrentContractor)
 		return nil, ErrForbidden
+	}
+
+	// Prevent manual state change to Ongoing - this should only happen via AcceptApplication
+	if req.State == models.JobStateOngoing && existingJob.State == models.JobStateWaiting {
+		log.Printf("UpdateJobState: Forbidden attempt to manually set job %s to Ongoing by user %s.", req.JobID, req.UserID)
+		return nil, fmt.Errorf("%w: cannot manually set state to Ongoing, use AcceptApplication", ErrInvalidTransition)
 	}
 
 	// Validation: Check state transition
@@ -203,18 +160,35 @@ func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobState
 		ID:    req.JobID,
 		State: &newState,
 	}
-	return s.jobRepo.Update(ctx, &updateRepoReq) // Handle repo errors
+	updatedJob, err := s.jobRepo.WithTx(tx).Update(ctx, &updateRepoReq) // Use tx repo
+	if err != nil {
+		log.Printf("UpdateJobState: Error updating job state %s in repo: %v", req.JobID, err)
+		return nil, mapRepoError(err, "updating job state")
+	}
+
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("UpdateJobState: Error committing transaction: %v", err)
+		return nil, fmt.Errorf("internal error committing changes: %w", err)
+	}
+	// --- End Transaction ---
+	return updatedJob, nil
 }
 
 func (s *jobService) DeleteJob(ctx context.Context, req *dto.DeleteJobRequest) error {
-	getReq := dto.GetJobByIDRequest{ID: req.ID}
-	existingJob, err := s.jobRepo.GetByID(ctx, &getReq)
-	if errors.Is(err, storage.ErrNotFound) {
-		return ErrNotFound
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		log.Printf("DeleteJob: Error beginning transaction: %v", err)
+		return fmt.Errorf("internal error starting transaction: %w", err)
 	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	getReq := dto.GetJobByIDRequest{ID: req.ID}
+	existingJob, err := s.jobRepo.WithTx(tx).GetByID(ctx, &getReq) // Use tx repo
 	if err != nil {
 		log.Printf("DeleteJob: Error fetching job %s for delete check: %v", req.ID, err)
-		return fmt.Errorf("internal error fetching job for deletion: %w", err)
+		return mapRepoError(err, "fetching job for delete check")
 	}
 
 	// Authorization Check
@@ -228,9 +202,17 @@ func (s *jobService) DeleteJob(ctx context.Context, req *dto.DeleteJobRequest) e
 	}
 
 	deleteReq := dto.DeleteJobRequest{ID: req.ID}
-	err = s.jobRepo.Delete(ctx, &deleteReq)
-	if errors.Is(err, storage.ErrNotFound) { 
-		return ErrNotFound
+	err = s.jobRepo.WithTx(tx).Delete(ctx, &deleteReq) // Use tx repo
+	if err != nil {
+		log.Printf("DeleteJob: Error deleting job %s in repo: %v", req.ID, err)
+		return mapRepoError(err, "deleting job")
 	}
-	return err // Pass up other potential repo errors
+
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("DeleteJob: Error committing transaction: %v", err)
+		return fmt.Errorf("internal error committing job deletion: %w", err)
+	}
+	// --- End Transaction ---
+	return nil
 }

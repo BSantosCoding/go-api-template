@@ -78,6 +78,42 @@ func (is InvoiceState) Value() (driver.Value, error) {
 	return string(is), nil
 }
 
+// --- Job State Enum ---
+type JobApplicationState string
+
+const (
+	JobApplicationWaiting JobApplicationState = "Waiting"
+	JobApplicationAccepted   JobApplicationState = "Accepted"
+	JobApplicationRejected  JobApplicationState = "Rejected"
+	JobApplicationWithdrawn  JobApplicationState = "Withdrawn"
+)
+
+// Scan implements the sql.Scanner interface for JobApplicationState
+func (jas *JobApplicationState) Scan(value interface{}) error {
+	strVal, ok := value.(string)
+	if !ok {
+		byteVal, ok := value.([]byte)
+		if ok {
+			strVal = string(byteVal)
+		} else {
+			return fmt.Errorf("failed to scan JobState: value is not string or []byte")
+		}
+	}
+	v := JobApplicationState(strVal)
+	switch v {
+	case JobApplicationAccepted, JobApplicationRejected, JobApplicationWithdrawn, JobApplicationWaiting:
+		*jas = v
+		return nil
+	default:
+		return fmt.Errorf("invalid JobState value: %s", strVal)
+	}
+}
+
+// Value implements the driver.Valuer interface for JobApplicationState
+func (jas JobApplicationState) Value() (driver.Value, error) {
+	return string(jas), nil
+}
+
 // User represents a user in the system
 type User struct {
 	// Assuming 'id' in DB is UUID type
@@ -119,6 +155,16 @@ type Invoice struct {
 	State     InvoiceState `json:"state" db:"state"`
 	JobID     uuid.UUID    `json:"job_id" db:"job_id"`
 	IntervalNumber int          `json:"interval_number" db:"interval_number"`
+	CreatedAt time.Time    `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// JobApplication represents a user application for a Job.
+type JobApplication struct {
+	ID        uuid.UUID    `json:"id" db:"id"`
+	ContractorID     uuid.UUID    `json:"contractor_id" db:"contractor_id"`
+	JobID     uuid.UUID    `json:"job_id" db:"job_id"`
+	State     JobApplicationState `json:"state" db:"state"`
 	CreatedAt time.Time    `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
 }
