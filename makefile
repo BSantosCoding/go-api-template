@@ -43,7 +43,7 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 
 test: ## Run all Service Integration tests 
 	@echo "Running Redis test instance..."
-	@docker run --name test-redis -d -p 6379:6379 redis:alpine
+	@docker run --name test-redis -d -p 6379:6379 redis:7-alpine
 	@echo "Running Go tests..."
 	@go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
 	@echo "Generating HTML coverage report..."
