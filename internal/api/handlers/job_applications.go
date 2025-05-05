@@ -36,7 +36,7 @@ var _ JobApplicationHandlerInterface = (*JobApplicationHandler)(nil)
 // @Tags         job_applications
 // @Accept       json
 // @Produce      json
-// @Param        job_id path      string true  "Job ID to apply for" Format(uuid)
+// @Param        id path      string true  "Job ID to apply for" Format(uuid)
 // @Success      201 {object}  dto.JobApplicationResponse "Application created successfully"
 // @Failure      400 {object}  map[string]string "Bad Request - Invalid Job ID or already applied"
 // @Failure      401 {object}  map[string]string "Unauthorized"
@@ -53,7 +53,7 @@ func (h *JobApplicationHandler) ApplyToJob(c *gin.Context) {
 		return
 	}
 
-	jobIDStr := c.Param("job_id") // Assuming the job ID is in the path like /jobs/{job_id}/apply
+	jobIDStr := c.Param("id") // Assuming the job ID is in the path like /jobs/{job_id}/apply
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
@@ -205,7 +205,7 @@ func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 // @Tags         job_applications
 // @Accept       json
 // @Produce      json
-// @Param        job_id path string true "Job ID" Format(uuid)
+// @Param        id path string true "Job ID" Format(uuid)
 // @Param        limit query int false "Pagination limit" default(10)
 // @Param        offset query int false "Pagination offset" default(0)
 // @Success      200 {array}   dto.JobApplicationResponse "Successfully retrieved list of applications"
@@ -224,7 +224,7 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 		return
 	}
 
-	jobIDStr := c.Param("job_id")
+	jobIDStr := c.Param("id")
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})

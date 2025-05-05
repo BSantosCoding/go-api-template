@@ -17,9 +17,9 @@ func RegisterJobApplicationRoutes(
 	jobsGroup.Use(authMiddleware)
 	{
 		// Apply for a specific job
-		jobsGroup.POST("/:job_id/apply", jobAppHandler.ApplyToJob)
+		jobsGroup.POST("/:id/apply", jobAppHandler.ApplyToJob)
 		// List applications for a specific job (Employer view)
-		jobsGroup.GET("/:job_id/applications", jobAppHandler.ListApplicationsByJob)
+		jobsGroup.GET("/:id/applications", jobAppHandler.ListApplicationsByJob)
 	}
 
 	// Group for actions related to applications themselves

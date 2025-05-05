@@ -31,3 +31,6 @@ Thumbs.db
 # Generated docs (will be generated during build)
 docs/
 
+# Frontend
+frontend/
+
