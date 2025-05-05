@@ -13,7 +13,7 @@ bin = "tmp/main"
 # Files or directories to watch. Changes here trigger a rebuild.
 include_ext = ["go", "tpl", "tmpl", "html", "env", "toml", "yaml", "json"] # Add config file types if needed
 # Directories to exclude from watching.
-exclude_dir = ["assets", "tmp", "vendor", "docs", "node_modules"] # Exclude generated docs and tmp dir
+exclude_dir = ["assets", "tmp", "vendor", "docs", "node_modules", "frontend"] # Exclude generated docs and tmp dir
 # Files to exclude
 # exclude_file = []
 # Regex patterns to exclude

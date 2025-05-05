@@ -174,10 +174,10 @@ func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.Update
 		return nil, mapRepoError(err, "getting job")
 	}
 
-	// --- Authorization Check: ONLY Contractor ---
-	isContractor := job.ContractorID != nil && *job.ContractorID == req.UserId
-	if !isContractor {
-		log.Printf("UpdateInvoiceState: Forbidden attempt by user %s on invoice %s (Job Contractor: %v)", req.UserId, req.ID, job.ContractorID)
+	// --- Authorization Check: ONLY Employer ---
+	isEmployer := job.EmployerID == req.UserId
+	if !isEmployer {
+		log.Printf("UpdateInvoiceState: Forbidden attempt by user %s on invoice %s (Job Employer: %v)", req.UserId, req.ID, job.EmployerID)
 		return nil, ErrForbidden
 	}
 	// --- End Auth Check ---

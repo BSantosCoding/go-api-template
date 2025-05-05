@@ -96,7 +96,7 @@ func Load() (*Config, error) {
 
 	// Default CORS: Allow common local dev origins and maybe wildcard for simple setup
 	// For production, this SHOULD be overridden by environment variables.
-	viper.SetDefault("cors.allowed_origins", []string{"http://localhost:3000", "http://127.0.0.1:3000"})
+	viper.SetDefault("cors.allowed_origins", []string{"*"})
 
 	// --- Read Config File (Optional) ---
 	if err := viper.ReadInConfig(); err != nil {

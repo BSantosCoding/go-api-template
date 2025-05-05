@@ -48,6 +48,9 @@ test: ## Run all Service Integration tests
 	@go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
 	@echo "Generating HTML coverage report..."
 	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Shutdown Redis test instance..."
+	@docker ps --filter name=test-redis --filter status=running -aq | xargs docker stop
+	@docker ps --filter name=test-redis -aq | xargs docker container rm
 
 # --- Migration Commands ---
 

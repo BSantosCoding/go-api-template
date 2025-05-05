@@ -8,7 +8,7 @@ import (
 
 // GetUserByIdRequest defines the structure for getting a user by id.
 type GetUserByIdRequest struct {
-	ID        uuid.UUID    `json:"id" validate:"required,uuid"` 
+	ID        uuid.UUID    `json:"id" validate:"required"` 
 }
 
 // GetUserByEmailRequest defines the structure for getting a user by email.
@@ -27,12 +27,12 @@ type CreateUserRequest struct {
 type UpdateUserRequest struct {
 	// Email    *string `json:"email" validate:"omitempty,email"` 
 	Name *string `json:"name" validate:"omitempty,max=100"`
-	ID        uuid.UUID    `json:"id" validate:"required,uuid"`
+	ID        uuid.UUID    `json:"id" validate:"required"`
 }
 
 // DeleteUserRequest defines the structure for deleting a user.
 type DeleteUserRequest struct {
-	ID        uuid.UUID    `json:"id" validate:"required,uuid"` 
+	ID        uuid.UUID    `json:"id" validate:"required"` 
 }
 
 // LoginRequest defines the structure for the login request body.

@@ -280,21 +280,21 @@ func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 			},
 			req: &dto.UpdateInvoiceStateRequest{
 				NewState: models.InvoiceStateComplete,
-				UserId:   contractor.ID, // Correct user
+				UserId:   employer.ID, // Correct user
 			},
 			// targetInvoiceID will be set by setupFunc
 			expectedState: models.InvoiceStateComplete,
 			expectedErr:   nil,
 		},
 		{
-			name: "Error_Forbidden_NotContractor",
+			name: "Error_Forbidden_NotEmployer",
 			setupFunc: func() uuid.UUID {
 				// Ensure a waiting invoice exists for this check
 				return createTestInvoice(t, ctx, pool, job.ID, 2, 500, models.InvoiceStateWaiting).ID
 			},
 			req: &dto.UpdateInvoiceStateRequest{
 				NewState: models.InvoiceStateComplete,
-				UserId:   employer.ID, // Employer cannot update state
+				UserId:   contractor.ID, // Employer cannot update state
 			},
 			// targetInvoiceID will be set by setupFunc
 			expectedState: models.InvoiceStateWaiting, // Should not change
@@ -308,7 +308,7 @@ func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 			},
 			req: &dto.UpdateInvoiceStateRequest{
 				NewState: models.InvoiceStateWaiting,
-				UserId:   contractor.ID,
+				UserId:   employer.ID,
 			},
 			// targetInvoiceID will be set by setupFunc
 			expectedState: models.InvoiceStateComplete, // Should not change
