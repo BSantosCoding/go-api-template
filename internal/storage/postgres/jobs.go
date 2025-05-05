@@ -290,7 +290,7 @@ func (r *JobRepo) Update(ctx context.Context, req *dto.UpdateJobRequest) (*model
 
 	// Add updated_at and WHERE clause
 	setClauses = append(setClauses, "updated_at = NOW()")
-	args = append(args, req.ID) // Add ID for WHERE clause
+	args = append(args, req.ID) 
 
 	query := fmt.Sprintf(`
 		UPDATE jobs

@@ -16,7 +16,7 @@ import (
 type jobService struct {
 	jobRepo storage.JobRepository
 	userRepo storage.UserRepository
-	db      *pgxpool.Pool // Add DB pool for transactions
+	db      *pgxpool.Pool 
 }
 
 // NewJobService creates a new instance of JobService.
@@ -26,7 +26,6 @@ func NewJobService(db *pgxpool.Pool) JobService {
 
 func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (*models.Job, error) {
 	// EmployerID is already set in the handler from context, passed in req.
-	// Add validation if needed (e.g., check if EmployerID exists in user table)
 	job, err := s.jobRepo.Create(ctx, req)
 	if err != nil {
 		log.Printf("JobService: Error creating job: %v", err)
