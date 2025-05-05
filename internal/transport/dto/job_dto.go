@@ -58,7 +58,7 @@ type UpdateJobRequest struct {
 	ID           uuid.UUID        `json:"-" validate:"required"` // From URL path
 	Rate         *float64         `json:"rate,omitempty" validate:"omitempty,gt=0"`
 	Duration     *int             `json:"duration,omitempty" validate:"omitempty,gt=0"`
-	ContractorID *uuid.UUID       `json:"contractor_id,omitempty" validate:"omitempty,uuid"` // For assigning/unassigning
+	ContractorID *uuid.UUID       `json:"contractor_id,omitempty" validate:"omitempty"` // For assigning/unassigning
 	State        *models.JobState `json:"state,omitempty" validate:"omitempty,oneof=Waiting Ongoing Complete Archived"`
 	// InvoiceInterval might not be updatable after creation
 }
