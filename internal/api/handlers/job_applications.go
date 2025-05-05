@@ -169,6 +169,8 @@ func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
 		return
 	}
+	req.ContractorID = userID // Set the contractor ID from context
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -181,8 +183,6 @@ func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 	if req.Offset < 0 {
 		req.Offset = 0
 	}
-
-	req.ContractorID = userID // Set the contractor ID from context
 
 	applications, err := h.service.ListApplicationsByContractor(c.Request.Context(), &req)
 	if err != nil {
@@ -236,6 +236,9 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
 		return
 	}
+	req.JobID = jobID
+	req.UserID = userID // Pass UserID for authorization check in service
+	
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -248,9 +251,6 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 	if req.Offset < 0 {
 		req.Offset = 0
 	}
-
-	req.JobID = jobID
-	req.UserID = userID // Pass UserID for authorization check in service
 
 	applications, err := h.service.ListApplicationsByJob(c.Request.Context(), &req)
 	if err != nil {

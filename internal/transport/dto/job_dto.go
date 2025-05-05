@@ -20,7 +20,7 @@ type CreateJobRequest struct {
 
 // GetJobByIDRequest defines the structure for getting a job by ID.
 type GetJobByIDRequest struct {
-	ID uuid.UUID `json:"-" validate:"required,uuid"`
+	ID uuid.UUID `json:"-" validate:"required"`
 }
 
 // ListAvailableJobsRequest defines parameters for listing available jobs.
@@ -33,7 +33,7 @@ type ListAvailableJobsRequest struct {
 
 // ListJobsByEmployerRequest defines parameters for listing jobs by employer.
 type ListJobsByEmployerRequest struct {
-	EmployerID uuid.UUID        `json:"-" validate:"required,uuid"` // Set internally by handler
+	EmployerID uuid.UUID        `json:"-" validate:"required"` // Set internally by handler
 	Limit      int              `form:"limit,default=10"`
 	Offset     int              `form:"offset,default=0"`
 	State      *models.JobState `form:"state" validate:"omitempty,oneof=Waiting Ongoing Complete Archived"` 
@@ -43,7 +43,7 @@ type ListJobsByEmployerRequest struct {
 
 // ListJobsByContractorRequest defines parameters for listing jobs by contractor.
 type ListJobsByContractorRequest struct {
-	ContractorID uuid.UUID        `json:"-" validate:"required,uuid"` // Set internally by handler
+	ContractorID uuid.UUID        `json:"-" validate:"required"` // Set internally by handler
 	Limit        int              `form:"limit,default=10"`
 	Offset       int              `form:"offset,default=0"`
 	State        *models.JobState `form:"state" validate:"omitempty,oneof=Waiting Ongoing Complete Archived"` 
@@ -55,7 +55,7 @@ type ListJobsByContractorRequest struct {
 // Different updates might need different DTOs (e.g., AssignContractor, UpdateJobState).
 // This is a general example; refine based on allowed updates.
 type UpdateJobRequest struct {
-	ID           uuid.UUID        `json:"-" validate:"required,uuid"` // From URL path
+	ID           uuid.UUID        `json:"-" validate:"required"` // From URL path
 	Rate         *float64         `json:"rate,omitempty" validate:"omitempty,gt=0"`
 	Duration     *int             `json:"duration,omitempty" validate:"omitempty,gt=0"`
 	ContractorID *uuid.UUID       `json:"contractor_id,omitempty" validate:"omitempty,uuid"` // For assigning/unassigning
@@ -80,7 +80,7 @@ type UpdateJobStateRequest struct {
 
 // DeleteJobRequest defines the structure for deleting a job.
 type DeleteJobRequest struct {
-	ID uuid.UUID `json:"-" validate:"required,uuid"`
+	ID uuid.UUID `json:"-" validate:"required"`
 	UserID uuid.UUID `json:"-"` // Set internally by handler from auth context
 }
 

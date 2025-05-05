@@ -55,13 +55,13 @@ func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
+	req.UserId = userID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-
-	req.UserId = userID
 
 	createdInvoice, err := h.service.CreateInvoice(c.Request.Context(), &req)
 	if err != nil {
@@ -183,6 +183,8 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 		return
 	}
 	req.JobID = jobID // Set JobID from path
+	req.UserId = userID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -191,7 +193,6 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 	if req.Limit <= 0 { req.Limit = 10 }
 	if req.Offset < 0 { req.Offset = 0 }
 
-	req.UserId = userID
 
 	invoices, err := h.service.ListInvoicesByJob(c.Request.Context(), &req)
 	if err != nil {
@@ -256,13 +257,13 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 		return
 	}
 	req.ID = invoiceID // Set ID from path
+	req.UserId = userID
+	
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-
-	req.UserId = userID
 
 	updatedInvoice, err := h.service.UpdateInvoiceState(c.Request.Context(), &req)
 	if err != nil {

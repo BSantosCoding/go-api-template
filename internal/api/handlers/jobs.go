@@ -58,14 +58,14 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
+	// Set EmployerID from context
+	req.EmployerID = employerID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-
-	// Set EmployerID from context
-	req.EmployerID = employerID
 
 	// Call h.repo.Create
 	createdJob, err := h.service.CreateJob(c.Request.Context(), &req)
@@ -218,6 +218,9 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
 		return
 	}
+	// Set EmployerID on DTO
+	req.EmployerID = employerID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -225,9 +228,6 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 	}
 	if req.Limit <= 0 { req.Limit = 10 }
 	if req.Offset < 0 { req.Offset = 0 }
-
-	// Set EmployerID on DTO
-	req.EmployerID = employerID
 
 	// Call h.repo.ListByEmployer
 	jobs, err := h.service.ListJobsByEmployer(c.Request.Context(), &req)
@@ -279,6 +279,9 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: " + err.Error()})
 		return
 	}
+	// Set ContractorID on DTO
+	req.ContractorID = contractorID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -286,9 +289,6 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 	}
 	if req.Limit <= 0 { req.Limit = 10 }
 	if req.Offset < 0 { req.Offset = 0 }
-
-	// Set ContractorID on DTO
-	req.ContractorID = contractorID
 
 	// Call h.repo.ListByContractor
 	jobs, err := h.service.ListJobsByContractor(c.Request.Context(), &req)
@@ -344,6 +344,9 @@ func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
+	req.UserID = userID
+	req.JobID = jobID
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -353,8 +356,6 @@ func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No update fields (rate, duration) provided"})
 		return
 	}
-	req.UserID = userID
-	req.JobID = jobID
 
 	updatedJob, err := h.service.UpdateJobDetails(c.Request.Context(), &req)
 	if err != nil {
@@ -408,14 +409,14 @@ func (h *JobHandler) UpdateJobState(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
+	req.JobID = jobID
+	req.UserID = userID
+	
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-
-	req.JobID = jobID
-	req.UserID = userID
 
 	updatedJob, err := h.service.UpdateJobState(c.Request.Context(), &req)
 	if err != nil {
