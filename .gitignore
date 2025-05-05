@@ -63,3 +63,6 @@ Thumbs.db
 # Go test coverage files
 coverage.html
 coverage.out
+
+#Dont add the frontend to git
+frontend/

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-api-template/internal/models"
 	"go-api-template/internal/transport/dto"
+	"time"
 
 	"github.com/go-playground/validator"
 )
@@ -72,5 +73,17 @@ func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceRespon
 		IntervalNumber: invoice.IntervalNumber,
 		CreatedAt:      invoice.CreatedAt,
 		UpdatedAt:      invoice.UpdatedAt,
+	}
+}
+
+// MapJobApplicationModelToResponse converts a models.JobApplication to a dto.JobApplicationResponse
+func MapJobApplicationModelToResponse(app *models.JobApplication) dto.JobApplicationResponse {
+	return dto.JobApplicationResponse{
+		ID:           app.ID,
+		ContractorID: app.ContractorID,
+		JobID:        app.JobID,
+		State:        app.State, // Assuming JobApplicationState is already a string or has a String() method
+		CreatedAt:    app.CreatedAt.Format(time.RFC3339), // Format time for consistency
+		UpdatedAt:    app.UpdatedAt.Format(time.RFC3339), // Format time for consistency
 	}
 }

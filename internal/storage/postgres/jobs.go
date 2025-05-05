@@ -20,12 +20,16 @@ import (
 
 // JobRepo implements the storage.JobRepository interface using PostgreSQL.
 type JobRepo struct {
-	db *pgxpool.Pool
+	db Querier
 }
 
 // NewJobRepo creates a new JobRepo.
 func NewJobRepo(db *pgxpool.Pool) *JobRepo {
 	return &JobRepo{db: db}
+}
+// WithTx creates a new JobRepo with the transaction.
+func (r *JobRepo) WithTx(tx pgx.Tx) storage.JobRepository {
+	return &JobRepo{db: tx}
 }
 
 // Compile-time check to ensure JobRepo implements JobRepository
@@ -279,13 +283,8 @@ func (r *JobRepo) Update(ctx context.Context, req *dto.UpdateJobRequest) (*model
 		argID++
 	}
 
-	// If no fields to update, maybe just fetch and return the current job?
-	// Or return an error? For now, we proceed, only updating updated_at.
 	if len(setClauses) == 0 {
 		log.Printf("Update called for job %s with no fields to change.", req.ID)
-		// Option 1: Fetch and return current state
-		// return r.GetByID(ctx, &dto.GetJobByIDRequest{ID: req.ID})
-		// Option 2: Return error
 		return nil, fmt.Errorf("no fields provided for update on job %s", req.ID)
 	}
 

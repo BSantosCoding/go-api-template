@@ -14,7 +14,6 @@ import (
 	"go-api-template/internal/blockchain"
 	"go-api-template/internal/database"
 	"go-api-template/internal/server"
-	"go-api-template/internal/storage/postgres"
 
 	_ "go-api-template/docs" // Import generated docs (will be created by swag init)
 
@@ -60,10 +59,6 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	userRepo := postgres.NewUserRepo(dbPool)
-	jobRepo := postgres.NewJobRepo(dbPool)
-	invoiceRepo := postgres.NewInvoiceRepo(dbPool)
-
 	// --- Initialize Blockchain Event Listener ---
 	var eventListener *blockchain.EventListener
 	if cfg.Blockchain.RPCURL != "" && cfg.Blockchain.ContractAddress != "" && cfg.Blockchain.ContractABIPath != "" {
@@ -85,9 +80,6 @@ func main() {
 		Config:   cfg,
 		DBPool:   dbPool,
 		RedisClient: redisClient,
-		UserRepo: userRepo,
-		JobRepo: jobRepo,
-		InvoiceRepo: invoiceRepo,
 		Validator: validate,
 	}
 

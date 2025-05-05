@@ -21,11 +21,20 @@ type JobHandlerInterface interface {
 	ListAvailableJobs(c *gin.Context)
 	ListEmployerJobs(c *gin.Context)  // Handler for employer's own jobs
 	ListContractorJobs(c *gin.Context) // Handler for contractor's own jobs
-	UpdateJobDetails(c *gin.Context)   // For Rate/Duration
-	AssignContractor(c *gin.Context)   // For assigning
-	UnassignContractor(c *gin.Context) // For unassigning
+	UpdateJobDetails(c *gin.Context)   // For Rate/Duration by Employer (before assignment)
 	UpdateJobState(c *gin.Context)
 	DeleteJob(c *gin.Context)
+}
+
+// JobApplicationHandlerInterface defines methods for job application routes.
+type JobApplicationHandlerInterface interface {
+	ApplyToJob(c *gin.Context)
+	GetApplicationByID(c *gin.Context)
+	ListApplicationsByContractor(c *gin.Context)
+	ListApplicationsByJob(c *gin.Context)
+	AcceptApplication(c *gin.Context)
+	RejectApplication(c *gin.Context)
+	WithdrawApplication(c *gin.Context)
 }
 
 // InvoiceHandlerInterface defines the methods needed by the invoice routes.
@@ -40,4 +49,5 @@ type InvoiceHandlerInterface interface {
 // Ensure handlers implements the interface (compile-time check)
 var _ UserHandlerInterface = (*UserHandler)(nil)
 var _ JobHandlerInterface = (*JobHandler)(nil)
+var _ JobApplicationHandlerInterface = (*JobApplicationHandler)(nil) // Add this when handler is created
 var _ InvoiceHandlerInterface = (*InvoiceHandler)(nil)

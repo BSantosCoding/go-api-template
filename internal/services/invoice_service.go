@@ -6,42 +6,59 @@ import (
 	"fmt"
 	"go-api-template/internal/models"
 	"go-api-template/internal/storage"
+	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
+	"log"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type invoiceService struct {
 	invoiceRepo storage.InvoiceRepository
 	jobRepo storage.JobRepository
+	db          *pgxpool.Pool // Add DB pool for transactions
 }
 
-func NewInvoiceService(invoiceRepo storage.InvoiceRepository, jobRepo storage.JobRepository) InvoiceService {
-	return &invoiceService{invoiceRepo: invoiceRepo, jobRepo: jobRepo}
+func NewInvoiceService(db *pgxpool.Pool) InvoiceService {
+	return &invoiceService{
+		invoiceRepo: postgres.NewInvoiceRepo(db),
+		jobRepo:     postgres.NewJobRepo(db),
+		db:          db,
+	}
 }
 
 func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoiceRequest) (*models.Invoice, error) {
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrNotFound
-		} else {
-			return nil, fmt.Errorf("internal error creating job: %w", err)
-		}
+		log.Printf("CreateInvoice: Error fetching job %s: %v", req.JobID, err)
+		return nil, mapRepoError(err, "fetching job for invoice creation")
 	}
 
+	// Authorization & State checks
 	if job.ContractorID == nil || *job.ContractorID != req.UserId {
+		log.Printf("CreateInvoice: Forbidden attempt by user %s on job %s (Contractor: %v)", req.UserId, req.JobID, job.ContractorID)
 		return nil, ErrForbidden
 	}
 	if job.State != models.JobStateOngoing {
-		return nil, ErrInvalidState
+		log.Printf("CreateInvoice: Attempt to create invoice for job %s in state %s", req.JobID, job.State)
+		return nil, ErrInvalidState // Correct error type
 	}
 
-	intervalReq := &dto.GetMaxIntervalForJobRequest{JobID: req.JobID}
-	maxIntervalNum, err := s.invoiceRepo.GetMaxIntervalForJob(ctx, intervalReq)
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("internal error creating job: %w", err)
+		log.Printf("CreateInvoice: Error beginning transaction: %v", err)
+		return nil, fmt.Errorf("internal error starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	txInvoiceRepo := s.invoiceRepo.WithTx(tx)
+	intervalReq := &dto.GetMaxIntervalForJobRequest{JobID: req.JobID}
+	maxIntervalNum, err := txInvoiceRepo.GetMaxIntervalForJob(ctx, intervalReq) // Use txInvoiceRepo
+	if err != nil {
+		return nil, mapRepoError(err, "getting max interval for job")
 	}
 	nextIntervalNumber := maxIntervalNum + 1
 
@@ -88,15 +105,21 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 		ID:			 uuid.New(), // Generate a new UUID for the invoice
 	}
 
-	invoice, err := s.invoiceRepo.Create(ctx, invoiceToCreate)
+	invoice, err := txInvoiceRepo.Create(ctx, invoiceToCreate) // Use txInvoiceRepo
 	if err != nil {
 		if errors.Is(err, storage.ErrConflict) {
 			return nil, ErrConflict
-		} else {
-			return nil, fmt.Errorf("internal error creating job: %w", err)
 		}
+		log.Printf("CreateInvoice: Error saving invoice in repo: %v", err)
+		return nil, fmt.Errorf("internal error saving invoice: %w", err)
 	}
 
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("CreateInvoice: Error committing transaction: %v", err)
+		return nil, mapRepoError(err, "committing invoice creation")
+	}
+	// --- End Transaction ---
 	return invoice, nil
 }
 
@@ -104,18 +127,14 @@ func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoice
 	// Call s.invoiceRepo.GetByID
 	invoice, err := s.invoiceRepo.GetByID(ctx, req)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrNotFound
-		} else {
-			return nil, fmt.Errorf("internal error getting invoice: %w", err)
-		}
+		return nil, mapRepoError(err, "getting invoice")
 	}
 
 	// Fetch associated Job using s.jobRepo.GetByID(invoice.JobID) for auth check
 	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
-		return nil, fmt.Errorf("internal error getting job: %w", err)
+		return nil, mapRepoError(err, "getting job")
 	}
 
 	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
@@ -129,27 +148,36 @@ func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoice
 }
 
 func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.UpdateInvoiceStateRequest) (*models.Invoice, error) {
+	// --- Transaction Start ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		log.Printf("UpdateInvoiceState: Error beginning transaction: %v", err)
+		return nil, fmt.Errorf("internal error starting transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if anything fails
+
+	txInvoiceRepo := s.invoiceRepo.WithTx(tx)
+	txJobRepo := s.jobRepo.WithTx(tx)
+	// --- End Transaction Setup ---
+
 	// Fetch Invoice
 	getReq := dto.GetInvoiceByIDRequest{ID: req.ID}
-	invoice, err := s.invoiceRepo.GetByID(ctx, &getReq)
+	invoice, err := txInvoiceRepo.GetByID(ctx, &getReq) // Use txInvoiceRepo
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrNotFound
-		} else {
-			return nil, fmt.Errorf("internal error getting invoice: %w", err)
-		}
+		return nil, mapRepoError(err, "getting invoice")
 	}
 
 	// Fetch Job for Auth Check
 	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
-	job, err := s.jobRepo.GetByID(ctx, &jobReq)
+	job, err := txJobRepo.GetByID(ctx, &jobReq) // Use txJobRepo
 	if err != nil {
-		return nil, fmt.Errorf("internal error getting job: %w", err)
+		return nil, mapRepoError(err, "getting job")
 	}
 
 	// --- Authorization Check: ONLY Contractor ---
 	isContractor := job.ContractorID != nil && *job.ContractorID == req.UserId
 	if !isContractor {
+		log.Printf("UpdateInvoiceState: Forbidden attempt by user %s on invoice %s (Job Contractor: %v)", req.UserId, req.ID, job.ContractorID)
 		return nil, ErrForbidden
 	}
 	// --- End Auth Check ---
@@ -159,15 +187,21 @@ func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.Update
 		return nil, ErrInvalidTransition
 	}
 
-	updatedInvoice, err := s.invoiceRepo.UpdateState(ctx, req)
+	updatedInvoice, err := txInvoiceRepo.UpdateState(ctx, req) // Use txInvoiceRepo
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrNotFound
-		} else {
-			return nil, fmt.Errorf("internal error updating invoice: %w", err)
-		}
+		return nil, mapRepoError(err, "updating invoice state")
 	}
 
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("UpdateInvoiceState: Error committing transaction: %v", err)
+		return nil, fmt.Errorf("internal error committing invoice update: %w", err)
+	}
+	// --- End Transaction ---
+
+	// TODO: Consider if updating the Job state to Complete should happen here
+	// if all invoices are Complete and the last interval is reached.
+	// This would require another transaction or careful coordination.
 	return updatedInvoice, nil
 }
 
@@ -175,19 +209,22 @@ func (s *invoiceService) DeleteInvoice(ctx context.Context, req *dto.DeleteInvoi
 	// Fetch Invoice
 	getReq := dto.GetInvoiceByIDRequest{ID: req.ID}
 	invoice, err := s.invoiceRepo.GetByID(ctx, &getReq)
+	// Note: No transaction needed here yet, just checking existence and state first.
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return ErrNotFound
-		} else {
-			return fmt.Errorf("internal error getting invoice: %w", err)
-		}
+		return mapRepoError(err, "getting invoice for deletion check")
 	}
 
 	// Fetch Job for Auth Check
 	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
-		return fmt.Errorf("internal error getting job: %w", err)
+		return mapRepoError(err, "getting job for deletion check")
+	}
+
+	// --- Transaction Start (only needed for the delete itself, but good practice) ---
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("internal error starting transaction: %w", err)
 	}
 
 	// --- Authorization Check: ONLY Contractor + State Waiting ---
@@ -200,14 +237,19 @@ func (s *invoiceService) DeleteInvoice(ctx context.Context, req *dto.DeleteInvoi
 	}
 	// --- End Auth Check ---
 
+	txInvoiceRepo := s.invoiceRepo.WithTx(tx)
+
 	// Call Repo Delete
-	err = s.invoiceRepo.Delete(ctx, req)
+	err = txInvoiceRepo.Delete(ctx, req) // Use txInvoiceRepo
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return ErrNotFound
-		} else {
-			return fmt.Errorf("internal error deleting invoice: %w", err)
-		}
+		tx.Rollback(ctx) // Rollback on error
+		return mapRepoError(err, "deleting invoice")
+	}
+
+	// --- Commit Transaction ---
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("DeleteInvoice: Error committing transaction: %v", err)
+		return fmt.Errorf("internal error committing invoice deletion: %w", err)
 	}
 
 	return nil
@@ -218,11 +260,7 @@ func (s *invoiceService) ListInvoicesByJob(ctx context.Context, req *dto.ListInv
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil, ErrNotFound
-		} else {
-			return nil, fmt.Errorf("internal error getting job: %w", err)
-		}
+		return nil, mapRepoError(err, "getting job for listing invoices")
 	}
 
 	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
@@ -235,7 +273,7 @@ func (s *invoiceService) ListInvoicesByJob(ctx context.Context, req *dto.ListInv
 	// Call s.invoiceRepo.ListByJob
 	invoices, err := s.invoiceRepo.ListByJob(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("internal error listing invoices: %w", err)
+		return nil, mapRepoError(err, "listing invoices")
 	}
 
 	return invoices, nil
