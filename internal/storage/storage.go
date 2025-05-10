@@ -52,7 +52,7 @@ type JobApplicationRepository interface {
 	ListByContractor(ctx context.Context, req *dto.ListJobApplicationsByContractorRequest) ([]models.JobApplication, error)
 	ListByJob(ctx context.Context, req *dto.ListJobApplicationsByJobRequest) ([]models.JobApplication, error)
 	UpdateState(ctx context.Context, req *dto.UpdateJobApplicationStateRequest) (*models.JobApplication, error)
-	UpdateStateByJobID(ctx context.Context, jobID uuid.UUID, newState models.JobApplicationState, excludeApplicationID *uuid.UUID) error // New method
+	UpdateStateByJobID(ctx context.Context, jobID uuid.UUID, newState models.JobApplicationState, excludeApplicationID *uuid.UUID) error
 	Delete(ctx context.Context, req *dto.DeleteJobApplicationRequest) error
 	WithTx(tx pgx.Tx) JobApplicationRepository
 }

@@ -1,11 +1,11 @@
 # ---- Builder Stage ----
 # Use a specific Go version with Alpine base for smaller size
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies for Go tools (like migrate, air, swag)
 # git is needed for go install
 # build-base is needed for CGO if any dependencies require it
-RUN apk add --no-cache git build-base
+RUN apk add --no-cache git build-base curl
 
 # Set the working directory inside the container
 WORKDIR /app

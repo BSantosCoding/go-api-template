@@ -17,7 +17,7 @@ import (
 type invoiceService struct {
 	invoiceRepo storage.InvoiceRepository
 	jobRepo storage.JobRepository
-	db          *pgxpool.Pool // Add DB pool for transactions
+	db          *pgxpool.Pool
 }
 
 func NewInvoiceService(db *pgxpool.Pool) InvoiceService {

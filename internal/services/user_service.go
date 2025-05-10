@@ -32,12 +32,12 @@ type userService struct {
 	jwtSecret     string
 	jwtExpiration time.Duration
 	refreshTokenExpiration time.Duration
-	db            *pgxpool.Pool // Add DB pool for transactions
+	db            *pgxpool.Pool 
 }
 
 // NewUserService creates a new instance of UserService.
 func NewUserService(redisClient *redis.Client, jwtSecret string, jwtExpiration, refreshTokenExpiration time.Duration, db *pgxpool.Pool) UserService {
-	return &userService{ // Add db to the struct initialization
+	return &userService{ 
 		repo:          postgres.NewUserRepo(db),
 		redisClient: redisClient,
 		jwtSecret:     jwtSecret,
@@ -187,14 +187,6 @@ func (s *userService) Update(ctx context.Context, req *dto.UpdateUserRequest) (*
 	// Use transaction-aware repository
 	txUserRepo := s.repo.WithTx(tx)
 	// --- End Transaction Setup ---
-
-	// Optional: Fetch user first if you need to perform checks before update
-	// getReq := dto.GetUserByIdRequest{ID: req.ID}
-	// _, err = txUserRepo.GetByID(ctx, &getReq)
-	// if err != nil {
-	//     return nil, mapRepoError(err, "getting user for update check")
-	// }
-	// Add authorization checks here if needed (already done in handler, but could be double-checked)
 
 	updatedUser, err := txUserRepo.Update(ctx, req) // Use txUserRepo
 	if err != nil {

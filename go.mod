@@ -1,6 +1,6 @@
 module go-api-template
 
-go 1.23.0
+go 1.24.0
 
 toolchain go1.24.2
 
@@ -12,7 +12,6 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/golang-migrate/migrate/v4 v4.18.3
-	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/redis/go-redis/v9 v9.8.0
