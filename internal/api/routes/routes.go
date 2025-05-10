@@ -44,8 +44,9 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	RegisterJobApplicationRoutes(apiV1, jobAppHandler, authMiddleware)
 
 	// --- Health Check ---
-	router.GET("/health", handlers.HealthCheck)
+	apiV1.GET("/health", handlers.HealthCheck)
 
+	// --- Swagger UI ---)
 	log.Println("Configuring Swagger UI handler") 
 	// Register the Swagger UI handler WITHOUT the explicit URL option.
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
