@@ -15,15 +15,15 @@ import (
 
 // InvoiceHandler holds dependencies for invoice operations.
 type InvoiceHandler struct {
-	service services.InvoiceService
-	validator   *validator.Validate
+	service   services.InvoiceService
+	validator *validator.Validate
 }
 
 // NewInvoiceHandler creates a new InvoiceHandler.
 func NewInvoiceHandler(service services.InvoiceService, validate *validator.Validate) *InvoiceHandler {
 	return &InvoiceHandler{
-		service: service,
-		validator:   validate,
+		service:   service,
+		validator: validate,
 	}
 }
 
@@ -127,7 +127,7 @@ func (h *InvoiceHandler) GetInvoiceByID(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Invoice not found"})
 		} else if errors.Is(err, services.ErrForbidden) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "User not associated with this invoice's job"})
-		}else {
+		} else {
 			log.Printf("GetInvoiceByID: Error fetching invoice %s: %v", invoiceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve invoice"})
 		}
@@ -190,9 +190,12 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-	if req.Limit <= 0 { req.Limit = 10 }
-	if req.Offset < 0 { req.Offset = 0 }
-
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
 
 	invoices, err := h.service.ListInvoicesByJob(c.Request.Context(), &req)
 	if err != nil {
@@ -210,7 +213,7 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 	// Map results to []dto.InvoiceResponse
 	invoiceResponses := make([]dto.InvoiceResponse, 0, len(invoices))
 	for _, invoice := range invoices {
-		invoiceResponses = append(invoiceResponses, MapInvoiceModelToInvoiceResponse(&invoice))
+		invoiceResponses = append(invoiceResponses, MapInvoiceModelToInvoiceResponse(invoice))
 	}
 
 	// Return JSON response
@@ -258,7 +261,7 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 	}
 	req.ID = invoiceID // Set ID from path
 	req.UserId = userID
-	
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -283,7 +286,6 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 	// Map and Return
 	c.JSON(http.StatusOK, MapInvoiceModelToInvoiceResponse(updatedInvoice))
 }
-
 
 // DeleteInvoice godoc
 // @Summary      Delete an invoice

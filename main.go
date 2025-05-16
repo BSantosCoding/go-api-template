@@ -17,6 +17,8 @@ import (
 
 	_ "go-api-template/docs" // Import generated docs (will be created by swag init)
 
+	_ "github.com/jackc/pgx/v5"
+
 	"github.com/go-playground/validator"
 )
 
@@ -53,11 +55,18 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	dbPool, err := database.NewConnectionPool(cfg.DB)
+	// --- Initialize Db ---
+	entClient, err := database.NewEntClient(cfg.DB)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer dbPool.Close()
+	defer entClient.Close()
+
+	ctx := context.Background()
+	if err := entClient.Schema.Create(ctx); err != nil {
+		log.Fatalf("failed creating schema resources: %v", err)
+	}
+	log.Println("Ent client connected and schema created/checked.")
 
 	// --- Initialize Blockchain Event Listener ---
 	var eventListener *blockchain.EventListener
@@ -77,10 +86,10 @@ func main() {
 	validate := validator.New()
 
 	application := &app.Application{
-		Config:   cfg,
-		DBPool:   dbPool,
+		Config:      cfg,
+		EntClient:   entClient,
 		RedisClient: redisClient,
-		Validator: validate,
+		Validator:   validate,
 	}
 
 	srv := server.NewServer(application)
@@ -107,4 +116,3 @@ func main() {
 
 	log.Println("Application gracefully stopped.")
 }
-

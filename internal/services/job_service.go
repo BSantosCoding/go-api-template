@@ -5,26 +5,27 @@ import (
 	"fmt"
 	"log"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/job"
 	"go-api-template/internal/storage"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
 )
 
 type jobService struct {
-	jobRepo storage.JobRepository
+	jobRepo  storage.JobRepository
 	userRepo storage.UserRepository
-	db      *pgxpool.Pool 
+	db       *ent.Client
 }
 
 // NewJobService creates a new instance of JobService.
-func NewJobService(db *pgxpool.Pool) JobService {
+func NewJobService(db *ent.Client) JobService {
 	return &jobService{jobRepo: postgres.NewJobRepo(db), userRepo: postgres.NewUserRepo(db), db: db}
 }
 
-func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (*models.Job, error) {
+func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (*ent.Job, error) {
 	// EmployerID is already set in the handler from context, passed in req.
 	job, err := s.jobRepo.Create(ctx, req)
 	if err != nil {
@@ -35,7 +36,7 @@ func (s *jobService) CreateJob(ctx context.Context, req *dto.CreateJobRequest) (
 	return job, nil
 }
 
-func (s *jobService) GetJobByID(ctx context.Context, req *dto.GetJobByIDRequest) (*models.Job, error) {
+func (s *jobService) GetJobByID(ctx context.Context, req *dto.GetJobByIDRequest) (*ent.Job, error) {
 	job, err := s.jobRepo.GetByID(ctx, req)
 	if err != nil {
 		log.Printf("JobService: Error getting job %s: %v", req.ID, err)
@@ -44,7 +45,7 @@ func (s *jobService) GetJobByID(ctx context.Context, req *dto.GetJobByIDRequest)
 	return job, nil
 }
 
-func (s *jobService) ListAvailableJobs(ctx context.Context, req *dto.ListAvailableJobsRequest) ([]models.Job, error) {
+func (s *jobService) ListAvailableJobs(ctx context.Context, req *dto.ListAvailableJobsRequest) ([]*ent.Job, error) {
 	jobs, err := s.jobRepo.ListAvailable(ctx, req)
 	if err != nil {
 		log.Printf("JobService: Error listing available jobs: %v", err)
@@ -53,7 +54,7 @@ func (s *jobService) ListAvailableJobs(ctx context.Context, req *dto.ListAvailab
 	return jobs, nil
 }
 
-func (s *jobService) ListJobsByEmployer(ctx context.Context, req *dto.ListJobsByEmployerRequest) ([]models.Job, error) {
+func (s *jobService) ListJobsByEmployer(ctx context.Context, req *dto.ListJobsByEmployerRequest) ([]*ent.Job, error) {
 	// EmployerID is set in handler from context and passed in req. (Might change this so it can be overridden to allow listing for other users)
 	jobs, err := s.jobRepo.ListByEmployer(ctx, req)
 	if err != nil {
@@ -63,7 +64,7 @@ func (s *jobService) ListJobsByEmployer(ctx context.Context, req *dto.ListJobsBy
 	return jobs, nil
 }
 
-func (s *jobService) ListJobsByContractor(ctx context.Context, req *dto.ListJobsByContractorRequest) ([]models.Job, error) {
+func (s *jobService) ListJobsByContractor(ctx context.Context, req *dto.ListJobsByContractorRequest) ([]*ent.Job, error) {
 	// ContractorID is set in handler from context and passed in req. (Might change this so it can be overridden to allow listing for other users)
 	jobs, err := s.jobRepo.ListByContractor(ctx, req)
 	if err != nil {
@@ -73,14 +74,14 @@ func (s *jobService) ListJobsByContractor(ctx context.Context, req *dto.ListJobs
 	return jobs, nil
 }
 
-func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDetailsRequest) (*models.Job, error) {
+func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDetailsRequest) (*ent.Job, error) {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("UpdateJobDetails: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	// Use transaction-aware repository
 	txJobRepo := s.jobRepo.WithTx(tx)
@@ -94,7 +95,7 @@ func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDet
 	}
 
 	// Authorization & State Check
-	if !(req.UserID == existingJob.EmployerID && existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
+	if !(req.UserID == existingJob.EmployerID && existingJob.State == job.StateWaiting && existingJob.ContractorID == uuid.Nil) {
 		log.Printf("UpdateJobDetails: Forbidden attempt on job %s by user %s. State: %s, Contractor: %v", req.JobID, req.UserID, existingJob.State, existingJob.ContractorID)
 		return nil, ErrForbidden // Or ErrInvalidState
 	}
@@ -111,7 +112,7 @@ func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDet
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("UpdateJobDetails: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing changes: %w", err)
 	}
@@ -119,14 +120,14 @@ func (s *jobService) UpdateJobDetails(ctx context.Context, req *dto.UpdateJobDet
 	return updatedJob, nil
 }
 
-func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobStateRequest) (*models.Job, error) {
+func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobStateRequest) (*ent.Job, error) {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("UpdateJobState: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	getReq := dto.GetJobByIDRequest{ID: req.JobID}
 	existingJob, err := s.jobRepo.WithTx(tx).GetByID(ctx, &getReq) // Use tx repo
@@ -137,14 +138,14 @@ func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobState
 
 	// Authorization check
 	isEmployer := existingJob.EmployerID == req.UserID
-	isCurrentContractor := existingJob.ContractorID != nil && *existingJob.ContractorID == req.UserID
+	isCurrentContractor := existingJob.ContractorID != uuid.Nil && existingJob.ContractorID == req.UserID
 	if !(isEmployer || isCurrentContractor) {
 		log.Printf("UpdateJobState: Forbidden attempt on job %s by user %s. Role: Employer=%t, Contractor=%t", req.JobID, req.UserID, isEmployer, isCurrentContractor)
 		return nil, ErrForbidden
 	}
 
 	// Prevent manual state change to Ongoing - this should only happen via AcceptApplication
-	if req.State == models.JobStateOngoing && existingJob.State == models.JobStateWaiting {
+	if req.State == job.StateOngoing && existingJob.State == job.StateWaiting {
 		log.Printf("UpdateJobState: Forbidden attempt to manually set job %s to Ongoing by user %s.", req.JobID, req.UserID)
 		return nil, fmt.Errorf("%w: cannot manually set state to Ongoing, use AcceptApplication", ErrInvalidTransition)
 	}
@@ -166,7 +167,7 @@ func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobState
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("UpdateJobState: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing changes: %w", err)
 	}
@@ -176,12 +177,12 @@ func (s *jobService) UpdateJobState(ctx context.Context, req *dto.UpdateJobState
 
 func (s *jobService) DeleteJob(ctx context.Context, req *dto.DeleteJobRequest) error {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("DeleteJob: Error beginning transaction: %v", err)
 		return fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	getReq := dto.GetJobByIDRequest{ID: req.ID}
 	existingJob, err := s.jobRepo.WithTx(tx).GetByID(ctx, &getReq) // Use tx repo
@@ -195,7 +196,7 @@ func (s *jobService) DeleteJob(ctx context.Context, req *dto.DeleteJobRequest) e
 		log.Printf("DeleteJob: Forbidden attempt on job %s by non-employer user %s", req.ID, req.UserID)
 		return ErrForbidden
 	}
-	if !(existingJob.State == models.JobStateWaiting && existingJob.ContractorID == nil) {
+	if !(existingJob.State == job.StateWaiting && existingJob.ContractorID == uuid.Nil) {
 		log.Printf("DeleteJob: Invalid state attempt on job %s. State: %s, Contractor: %v", req.ID, existingJob.State, existingJob.ContractorID)
 		return ErrInvalidState
 	}
@@ -208,7 +209,7 @@ func (s *jobService) DeleteJob(ctx context.Context, req *dto.DeleteJobRequest) e
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("DeleteJob: Error committing transaction: %v", err)
 		return fmt.Errorf("internal error committing job deletion: %w", err)
 	}

@@ -3,16 +3,16 @@ package app
 
 import (
 	"go-api-template/config"
+	"go-api-template/ent"
 
 	"github.com/go-playground/validator"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
 // Application holds core application dependencies.
 type Application struct {
-	Config   *config.Config
-	DBPool   *pgxpool.Pool
+	Config      *config.Config
+	EntClient   *ent.Client
 	RedisClient *redis.Client
-	Validator *validator.Validate
+	Validator   *validator.Validate
 }

@@ -3,45 +3,48 @@ package services
 import (
 	"context"
 	"fmt"
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/job"
+	"go-api-template/ent/jobapplication"
 	"go-api-template/internal/storage"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 	"log"
 
-	"github.com/jackc/pgx/v5/pgxpool" // Import pgxpool for transaction handling
+	"github.com/google/uuid"
+	// Import pgxpool for transaction handling
 )
 
 type jobApplicationService struct {
 	appRepo storage.JobApplicationRepository
 	jobRepo storage.JobRepository
-	db      *pgxpool.Pool 
+	db      *ent.Client
 }
 
 // NewJobApplicationService creates a new instance of JobApplicationService.
-func NewJobApplicationService(db *pgxpool.Pool) JobApplicationService {
+func NewJobApplicationService(db *ent.Client) JobApplicationService {
 	return &jobApplicationService{
 		appRepo: postgres.NewJobApplicationRepo(db),
 		jobRepo: postgres.NewJobRepo(db),
-		db:      db, 
+		db:      db,
 	}
 }
 
 // ApplyToJob creates a new job application for a user to a specific job.
-func (s *jobApplicationService) ApplyToJob(ctx context.Context, req *dto.ApplyToJobRequest) (*models.JobApplication, error) {
+func (s *jobApplicationService) ApplyToJob(ctx context.Context, req *dto.ApplyToJobRequest) (*ent.JobApplication, error) {
 	// 1. Fetch the Job to check its state
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
-	job, err := s.jobRepo.GetByID(ctx, &jobReq)
+	jobFound, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
 		return nil, mapRepoError(err, fmt.Sprintf("fetching job %s for application", req.JobID))
 	}
 
 	// 2. Authorization/Validation
-	if job.State != models.JobStateWaiting || job.ContractorID != nil {
-		log.Printf("ApplyToJob: Attempt to apply to non-available job %s (State: %s, Contractor: %v)", req.JobID, job.State, job.ContractorID)
+	if jobFound.State != job.StateWaiting || jobFound.ContractorID != uuid.Nil {
+		log.Printf("ApplyToJob: Attempt to apply to non-available job %s (State: %s, Contractor: %v)", req.JobID, jobFound.State, jobFound.ContractorID)
 		return nil, fmt.Errorf("%w: job is not available for applications", ErrInvalidState)
 	}
-	if job.EmployerID == req.ContractorID {
+	if jobFound.EmployerID == req.ContractorID {
 		return nil, fmt.Errorf("%w: employer cannot apply to their own job", ErrForbidden)
 	}
 	// TODO: Add check if user is actually a contractor (if roles exist)
@@ -61,14 +64,14 @@ func (s *jobApplicationService) ApplyToJob(ctx context.Context, req *dto.ApplyTo
 }
 
 // AcceptApplication changes application state to Accepted, assigns contractor to job, and sets job state to Ongoing.
-func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.AcceptApplicationRequest) (*models.Job, error) {
+func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.AcceptApplicationRequest) (*ent.Job, error) {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("AcceptApplication: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	// Use transaction-aware repositories
 	txAppRepo := s.appRepo.WithTx(tx)
@@ -84,7 +87,7 @@ func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.
 
 	// 2. Fetch the Job (within transaction)
 	jobReq := dto.GetJobByIDRequest{ID: application.JobID}
-	job, err := txJobRepo.GetByID(ctx, &jobReq)
+	jobFound, err := txJobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
 		// Should not happen if application exists, but handle defensively
 		log.Printf("AcceptApplication: Error fetching job %s within transaction: %v", application.JobID, err)
@@ -92,21 +95,21 @@ func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.
 	}
 
 	// 3. Authorization & State Checks
-	if job.EmployerID != req.UserID {
-		log.Printf("AcceptApplication: Forbidden attempt by user %s on job %s owned by %s", req.UserID, job.ID, job.EmployerID)
+	if jobFound.EmployerID != req.UserID {
+		log.Printf("AcceptApplication: Forbidden attempt by user %s on job %s owned by %s", req.UserID, jobFound.ID, jobFound.EmployerID)
 		return nil, ErrForbidden
 	}
-	if job.State != models.JobStateWaiting || job.ContractorID != nil {
-		log.Printf("AcceptApplication: Attempt to accept application for non-available job %s (State: %s, Contractor: %v)", job.ID, job.State, job.ContractorID)
+	if jobFound.State != job.StateWaiting || jobFound.ContractorID != uuid.Nil {
+		log.Printf("AcceptApplication: Attempt to accept application for non-available job %s (State: %s, Contractor: %v)", jobFound.ID, jobFound.State, jobFound.ContractorID)
 		return nil, fmt.Errorf("%w: job is not in a state to accept applications", ErrInvalidState)
 	}
-	if application.State != models.JobApplicationWaiting {
+	if application.State != jobapplication.StateWaiting {
 		log.Printf("AcceptApplication: Attempt to accept non-waiting application %s (State: %s)", application.ID, application.State)
 		return nil, fmt.Errorf("%w: application is not in 'Waiting' state", ErrInvalidState)
 	}
 
 	// 4. Update Application State (within transaction)
-	updateAppReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: models.JobApplicationAccepted}
+	updateAppReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: jobapplication.StateAccepted}
 	_, err = txAppRepo.UpdateState(ctx, &updateAppReq)
 	if err != nil {
 		log.Printf("AcceptApplication: Error updating application state for %s: %v", application.ID, err)
@@ -115,27 +118,27 @@ func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.
 
 	// 5. Update Job State and Assign Contractor (within transaction)
 	contractorID := application.ContractorID
-	newState := models.JobStateOngoing
+	newState := job.StateOngoing
 	updateJobReq := dto.UpdateJobRequest{
-		ID:           job.ID,
+		ID:           jobFound.ID,
 		ContractorID: &contractorID,
 		State:        &newState,
 	}
 	updatedJob, err := txJobRepo.Update(ctx, &updateJobReq)
 	if err != nil {
-		log.Printf("AcceptApplication: Error updating job %s: %v", job.ID, err)
+		log.Printf("AcceptApplication: Error updating job %s: %v", jobFound.ID, err)
 		return nil, mapRepoError(err, "updating job state")
 	}
 
 	// 6. Reject other 'Waiting' applications for the same job (within transaction)
-	err = txAppRepo.UpdateStateByJobID(ctx, job.ID, models.JobApplicationRejected, &application.ID)
+	err = txAppRepo.UpdateStateByJobID(ctx, jobFound.ID, jobapplication.StateRejected, &application.ID)
 	if err != nil {
-		log.Printf("AcceptApplication: Error rejecting other applications for job %s: %v", job.ID, err)
+		log.Printf("AcceptApplication: Error rejecting other applications for job %s: %v", jobFound.ID, err)
 		return nil, mapRepoError(err, "rejecting other applications")
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("AcceptApplication: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing changes: %w", err)
 	}
@@ -147,7 +150,7 @@ func (s *jobApplicationService) AcceptApplication(ctx context.Context, req *dto.
 
 // GetApplicationByID retrieves an application, checking authorization.
 // User must be the applicant or the job employer.
-func (s *jobApplicationService) GetApplicationByID(ctx context.Context, req *dto.GetJobApplicationByIDRequest) (*models.JobApplication, error) {
+func (s *jobApplicationService) GetApplicationByID(ctx context.Context, req *dto.GetJobApplicationByIDRequest) (*ent.JobApplication, error) {
 	// 1. Fetch the application
 	application, err := s.appRepo.GetByID(ctx, req)
 	if err != nil {
@@ -176,7 +179,7 @@ func (s *jobApplicationService) GetApplicationByID(ctx context.Context, req *dto
 }
 
 // ListApplicationsByContractor retrieves applications for the requesting user.
-func (s *jobApplicationService) ListApplicationsByContractor(ctx context.Context, req *dto.ListJobApplicationsByContractorRequest) ([]models.JobApplication, error) {
+func (s *jobApplicationService) ListApplicationsByContractor(ctx context.Context, req *dto.ListJobApplicationsByContractorRequest) ([]*ent.JobApplication, error) {
 	applications, err := s.appRepo.ListByContractor(ctx, req)
 	if err != nil {
 		log.Printf("ListApplicationsByContractor: Error listing applications for contractor %s: %v", req.ContractorID, err)
@@ -186,7 +189,7 @@ func (s *jobApplicationService) ListApplicationsByContractor(ctx context.Context
 }
 
 // ListApplicationsByJob retrieves applications for a specific job, checking authorization.
-func (s *jobApplicationService) ListApplicationsByJob(ctx context.Context, req *dto.ListJobApplicationsByJobRequest) ([]models.JobApplication, error) {
+func (s *jobApplicationService) ListApplicationsByJob(ctx context.Context, req *dto.ListJobApplicationsByJobRequest) ([]*ent.JobApplication, error) {
 	// 1. Fetch the job to verify existence and check ownership
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
@@ -210,14 +213,14 @@ func (s *jobApplicationService) ListApplicationsByJob(ctx context.Context, req *
 }
 
 // RejectApplication changes application state to Rejected.
-func (s *jobApplicationService) RejectApplication(ctx context.Context, req *dto.RejectApplicationRequest) (*models.JobApplication, error) {
+func (s *jobApplicationService) RejectApplication(ctx context.Context, req *dto.RejectApplicationRequest) (*ent.JobApplication, error) {
 	// --- Transaction Start (Read-Check-Write pattern) ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("RejectApplication: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	txAppRepo := s.appRepo.WithTx(tx)
 	txJobRepo := s.jobRepo.WithTx(tx)
@@ -247,13 +250,13 @@ func (s *jobApplicationService) RejectApplication(ctx context.Context, req *dto.
 	}
 
 	// 4. State Check: Can only reject 'Waiting' applications
-	if application.State != models.JobApplicationWaiting {
+	if application.State != jobapplication.StateWaiting {
 		log.Printf("RejectApplication: Attempt to reject non-waiting application %s (State: %s)", application.ID, application.State)
 		return nil, fmt.Errorf("%w: application is not in 'Waiting' state, current state: %s", ErrInvalidState, application.State)
 	}
 
 	// 5. Update Application State (within transaction)
-	updateReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: models.JobApplicationRejected}
+	updateReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: jobapplication.StateRejected}
 	updatedApp, err := txAppRepo.UpdateState(ctx, &updateReq)
 	if err != nil {
 		log.Printf("RejectApplication: Error updating application state for %s: %v", application.ID, err)
@@ -261,7 +264,7 @@ func (s *jobApplicationService) RejectApplication(ctx context.Context, req *dto.
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("RejectApplication: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing rejection: %w", err)
 	}
@@ -272,14 +275,14 @@ func (s *jobApplicationService) RejectApplication(ctx context.Context, req *dto.
 }
 
 // WithdrawApplication changes application state to Withdrawn.
-func (s *jobApplicationService) WithdrawApplication(ctx context.Context, req *dto.WithdrawApplicationRequest) (*models.JobApplication, error) {
+func (s *jobApplicationService) WithdrawApplication(ctx context.Context, req *dto.WithdrawApplicationRequest) (*ent.JobApplication, error) {
 	// --- Transaction Start (Read-Check-Write pattern) ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("WithdrawApplication: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	txAppRepo := s.appRepo.WithTx(tx)
 	// --- End Transaction Setup ---
@@ -299,13 +302,13 @@ func (s *jobApplicationService) WithdrawApplication(ctx context.Context, req *dt
 	}
 
 	// 3. State Check: Can only withdraw 'Waiting' applications
-	if application.State != models.JobApplicationWaiting {
+	if application.State != jobapplication.StateWaiting {
 		log.Printf("WithdrawApplication: Attempt to withdraw non-waiting application %s (State: %s)", application.ID, application.State)
 		return nil, fmt.Errorf("%w: application is not in 'Waiting' state, current state: %s", ErrInvalidState, application.State)
 	}
 
 	// 4. Update Application State (within transaction)
-	updateReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: models.JobApplicationWithdrawn}
+	updateReq := dto.UpdateJobApplicationStateRequest{ID: application.ID, State: jobapplication.StateWithdrawn}
 	updatedApp, err := txAppRepo.UpdateState(ctx, &updateReq)
 	if err != nil {
 		log.Printf("WithdrawApplication: Error updating application state for %s: %v", application.ID, err)
@@ -313,7 +316,7 @@ func (s *jobApplicationService) WithdrawApplication(ctx context.Context, req *dt
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("WithdrawApplication: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing withdrawal: %w", err)
 	}
@@ -322,4 +325,3 @@ func (s *jobApplicationService) WithdrawApplication(ctx context.Context, req *dt
 	log.Printf("Job application %s withdrawn successfully by user %s", updatedApp.ID, req.UserID)
 	return updatedApp, nil
 }
-

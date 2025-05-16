@@ -9,45 +9,44 @@ import (
 	"log"
 	"time"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
 	"go-api-template/internal/storage"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	RefreshTokenBytes = 32
+	RefreshTokenBytes       = 32
 	RedisRefreshTokenPrefix = "refresh_token:"
 )
 
 type userService struct {
-	repo          storage.UserRepository
+	repo                   storage.UserRepository
 	redisClient            *redis.Client
-	jwtSecret     string
-	jwtExpiration time.Duration
+	jwtSecret              string
+	jwtExpiration          time.Duration
 	refreshTokenExpiration time.Duration
-	db            *pgxpool.Pool 
+	db                     *ent.Client
 }
 
 // NewUserService creates a new instance of UserService.
-func NewUserService(redisClient *redis.Client, jwtSecret string, jwtExpiration, refreshTokenExpiration time.Duration, db *pgxpool.Pool) UserService {
-	return &userService{ 
-		repo:          postgres.NewUserRepo(db),
-		redisClient: redisClient,
-		jwtSecret:     jwtSecret,
-		jwtExpiration: jwtExpiration,
+func NewUserService(redisClient *redis.Client, jwtSecret string, jwtExpiration, refreshTokenExpiration time.Duration, db *ent.Client) UserService {
+	return &userService{
+		repo:                   postgres.NewUserRepo(db),
+		redisClient:            redisClient,
+		jwtSecret:              jwtSecret,
+		jwtExpiration:          jwtExpiration,
 		refreshTokenExpiration: refreshTokenExpiration,
-		db: db,
+		db:                     db,
 	}
 }
 
-func (s *userService) Register(ctx context.Context, req *dto.CreateUserRequest) (*models.User, error) {
+func (s *userService) Register(ctx context.Context, req *dto.CreateUserRequest) (*ent.User, error) {
 	user, err := s.repo.Create(ctx, req)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateEmail) || errors.Is(err, storage.ErrConflict) {
@@ -59,7 +58,7 @@ func (s *userService) Register(ctx context.Context, req *dto.CreateUserRequest) 
 	return user, nil
 }
 
-func (s *userService) Login(ctx context.Context, req *dto.LoginRequest) (*models.User, string, string, error) {
+func (s *userService) Login(ctx context.Context, req *dto.LoginRequest) (*ent.User, string, string, error) {
 	emailReq := dto.GetUserByEmailRequest{Email: req.Email}
 	user, err := s.repo.GetByEmail(ctx, &emailReq)
 	if err != nil {
@@ -155,11 +154,11 @@ func (s *userService) Logout(ctx context.Context, req *dto.LogoutRequest) error 
 	return nil
 }
 
-func (s *userService) GetAll(ctx context.Context) ([]models.User, error) {
+func (s *userService) GetAll(ctx context.Context) ([]*ent.User, error) {
 	return s.repo.GetAll(ctx)
 }
 
-func (s *userService) GetByID(ctx context.Context, req *dto.GetUserByIdRequest) (*models.User, error) {
+func (s *userService) GetByID(ctx context.Context, req *dto.GetUserByIdRequest) (*ent.User, error) {
 	user, err := s.repo.GetByID(ctx, req)
 	if errors.Is(err, storage.ErrNotFound) {
 		return nil, ErrNotFound
@@ -167,7 +166,7 @@ func (s *userService) GetByID(ctx context.Context, req *dto.GetUserByIdRequest) 
 	return user, err
 }
 
-func (s *userService) GetByEmail(ctx context.Context, req *dto.GetUserByEmailRequest) (*models.User, error) {
+func (s *userService) GetByEmail(ctx context.Context, req *dto.GetUserByEmailRequest) (*ent.User, error) {
 	user, err := s.repo.GetByEmail(ctx, req)
 	if errors.Is(err, storage.ErrNotFound) {
 		return nil, ErrNotFound
@@ -175,14 +174,14 @@ func (s *userService) GetByEmail(ctx context.Context, req *dto.GetUserByEmailReq
 	return user, err
 }
 
-func (s *userService) Update(ctx context.Context, req *dto.UpdateUserRequest) (*models.User, error) {
+func (s *userService) Update(ctx context.Context, req *dto.UpdateUserRequest) (*ent.User, error) {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("UserService.Update: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	// Use transaction-aware repository
 	txUserRepo := s.repo.WithTx(tx)
@@ -194,7 +193,7 @@ func (s *userService) Update(ctx context.Context, req *dto.UpdateUserRequest) (*
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("UserService.Update: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing user update: %w", err)
 	}

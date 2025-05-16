@@ -6,14 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
 	"go-api-template/internal/services"
 	"go-api-template/internal/storage"          // For storage errors
 	"go-api-template/internal/storage/postgres" // Need concrete repo for assertion
 	"go-api-template/internal/transport/dto"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9" // Import redis
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +29,7 @@ const (
 
 // setupUserServiceIntegrationTest initializes the service with a real DB pool
 // and potentially a real/mock Redis client.
-func setupUserServiceIntegrationTest(t *testing.T) (context.Context, services.UserService, *pgxpool.Pool, *redis.Client) {
+func setupUserServiceIntegrationTest(t *testing.T) (context.Context, services.UserService, *ent.Client, *redis.Client) {
 	t.Helper()
 	pool, redisClient := getTestClients(t)
 	userService := services.NewUserService(redisClient, testJwtSecret, testJwtExpiration, testRefreshTokenExpiration, pool)
@@ -132,8 +131,8 @@ func TestUserService_Integration_Update(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, updatedUser)
 	assert.Equal(t, createdUser.ID, updatedUser.ID)
-	assert.Equal(t, updatedName, updatedUser.Name)       // Check updated name
-	assert.Equal(t, initialEmail, updatedUser.Email)     // Email should not change
+	assert.Equal(t, updatedName, updatedUser.Name)   // Check updated name
+	assert.Equal(t, initialEmail, updatedUser.Email) // Email should not change
 	assert.True(t, updatedUser.UpdatedAt.After(createdUser.UpdatedAt))
 
 	// Verify directly in DB
@@ -208,7 +207,7 @@ func TestUserService_Integration_GetAll(t *testing.T) {
 	assert.Len(t, users, 2)
 	// Optionally check specific fields if needed, keeping in mind order might vary
 	// Use map for easier checking regardless of order
-	userMap := make(map[uuid.UUID]models.User)
+	userMap := make(map[uuid.UUID]*ent.User)
 	for _, u := range users {
 		userMap[u.ID] = u
 	}

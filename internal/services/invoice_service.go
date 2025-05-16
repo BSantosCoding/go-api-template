@@ -4,23 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/invoice"
+	"go-api-template/ent/job"
 	"go-api-template/internal/storage"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 	"log"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type invoiceService struct {
 	invoiceRepo storage.InvoiceRepository
-	jobRepo storage.JobRepository
-	db          *pgxpool.Pool
+	jobRepo     storage.JobRepository
+	db          *ent.Client
 }
 
-func NewInvoiceService(db *pgxpool.Pool) InvoiceService {
+func NewInvoiceService(db *ent.Client) InvoiceService {
 	return &invoiceService{
 		invoiceRepo: postgres.NewInvoiceRepo(db),
 		jobRepo:     postgres.NewJobRepo(db),
@@ -28,31 +29,31 @@ func NewInvoiceService(db *pgxpool.Pool) InvoiceService {
 	}
 }
 
-func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoiceRequest) (*models.Invoice, error) {
+func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoiceRequest) (*ent.Invoice, error) {
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
-	job, err := s.jobRepo.GetByID(ctx, &jobReq)
+	jobFound, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
 		log.Printf("CreateInvoice: Error fetching job %s: %v", req.JobID, err)
 		return nil, mapRepoError(err, "fetching job for invoice creation")
 	}
 
 	// Authorization & State checks
-	if job.ContractorID == nil || *job.ContractorID != req.UserId {
-		log.Printf("CreateInvoice: Forbidden attempt by user %s on job %s (Contractor: %v)", req.UserId, req.JobID, job.ContractorID)
+	if jobFound.ContractorID == uuid.Nil || jobFound.ContractorID != req.UserId {
+		log.Printf("CreateInvoice: Forbidden attempt by user %s on job %s (Contractor: %v)", req.UserId, req.JobID, jobFound.ContractorID)
 		return nil, ErrForbidden
 	}
-	if job.State != models.JobStateOngoing {
-		log.Printf("CreateInvoice: Attempt to create invoice for job %s in state %s", req.JobID, job.State)
+	if jobFound.State != job.StateOngoing {
+		log.Printf("CreateInvoice: Attempt to create invoice for job %s in state %s", req.JobID, jobFound.State)
 		return nil, ErrInvalidState // Correct error type
 	}
 
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("CreateInvoice: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	txInvoiceRepo := s.invoiceRepo.WithTx(tx)
 	intervalReq := &dto.GetMaxIntervalForJobRequest{JobID: req.JobID}
@@ -62,12 +63,12 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 	}
 	nextIntervalNumber := maxIntervalNum + 1
 
-	if job.InvoiceInterval <= 0 {
+	if jobFound.InvoiceInterval <= 0 {
 		return nil, ErrInvalidInvoiceInterval
 	}
 
-	maxPossibleIntervals := job.Duration / job.InvoiceInterval
-	remainderHours := job.Duration % job.InvoiceInterval
+	maxPossibleIntervals := jobFound.Duration / jobFound.InvoiceInterval
+	remainderHours := jobFound.Duration % jobFound.InvoiceInterval
 	isPartialLastInterval := remainderHours != 0
 	if isPartialLastInterval {
 		maxPossibleIntervals++
@@ -85,10 +86,10 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 		hoursForThisInterval = remainderHours
 	} else {
 		// It's either not the last interval, or the last interval is a full one
-		hoursForThisInterval = job.InvoiceInterval
+		hoursForThisInterval = jobFound.InvoiceInterval
 	}
 
-	baseValue := job.Rate * float64(hoursForThisInterval) // Use calculated hours
+	baseValue := jobFound.Rate * float64(hoursForThisInterval) // Use calculated hours
 	finalValue := baseValue
 	if req.Adjustment != nil {
 		finalValue += *req.Adjustment
@@ -97,12 +98,12 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 		finalValue = 0
 	}
 
-	invoiceToCreate := &models.Invoice{
+	invoiceToCreate := &ent.Invoice{
 		JobID:          req.JobID,
 		IntervalNumber: nextIntervalNumber,
 		Value:          finalValue,
-		State:          models.InvoiceStateWaiting,
-		ID:			 uuid.New(), // Generate a new UUID for the invoice
+		State:          invoice.StateWaiting,
+		ID:             uuid.New(), // Generate a new UUID for the invoice
 	}
 
 	invoice, err := txInvoiceRepo.Create(ctx, invoiceToCreate) // Use txInvoiceRepo
@@ -115,7 +116,7 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("CreateInvoice: Error committing transaction: %v", err)
 		return nil, mapRepoError(err, "committing invoice creation")
 	}
@@ -123,7 +124,7 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, req *dto.CreateInvoi
 	return invoice, nil
 }
 
-func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoiceByIDRequest) (*models.Invoice, error) {
+func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoiceByIDRequest) (*ent.Invoice, error) {
 	// Call s.invoiceRepo.GetByID
 	invoice, err := s.invoiceRepo.GetByID(ctx, req)
 	if err != nil {
@@ -139,7 +140,7 @@ func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoice
 
 	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
 	isEmployer := job.EmployerID == req.UserId
-	isContractor := job.ContractorID != nil && *job.ContractorID == req.UserId
+	isContractor := job.ContractorID != uuid.Nil && job.ContractorID == req.UserId
 	if !(isEmployer || isContractor) {
 		return nil, ErrForbidden
 	}
@@ -147,14 +148,14 @@ func (s *invoiceService) GetInvoiceByID(ctx context.Context, req *dto.GetInvoice
 	return invoice, nil
 }
 
-func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.UpdateInvoiceStateRequest) (*models.Invoice, error) {
+func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.UpdateInvoiceStateRequest) (*ent.Invoice, error) {
 	// --- Transaction Start ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		log.Printf("UpdateInvoiceState: Error beginning transaction: %v", err)
 		return nil, fmt.Errorf("internal error starting transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if anything fails
+	defer tx.Rollback() // Rollback if anything fails
 
 	txInvoiceRepo := s.invoiceRepo.WithTx(tx)
 	txJobRepo := s.jobRepo.WithTx(tx)
@@ -193,7 +194,7 @@ func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.Update
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("UpdateInvoiceState: Error committing transaction: %v", err)
 		return nil, fmt.Errorf("internal error committing invoice update: %w", err)
 	}
@@ -208,31 +209,31 @@ func (s *invoiceService) UpdateInvoiceState(ctx context.Context, req *dto.Update
 func (s *invoiceService) DeleteInvoice(ctx context.Context, req *dto.DeleteInvoiceRequest) error {
 	// Fetch Invoice
 	getReq := dto.GetInvoiceByIDRequest{ID: req.ID}
-	invoice, err := s.invoiceRepo.GetByID(ctx, &getReq)
+	invoiceFound, err := s.invoiceRepo.GetByID(ctx, &getReq)
 	// Note: No transaction needed here yet, just checking existence and state first.
 	if err != nil {
 		return mapRepoError(err, "getting invoice for deletion check")
 	}
 
 	// Fetch Job for Auth Check
-	jobReq := dto.GetJobByIDRequest{ID: invoice.JobID}
+	jobReq := dto.GetJobByIDRequest{ID: invoiceFound.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
 	if err != nil {
 		return mapRepoError(err, "getting job for deletion check")
 	}
 
 	// --- Transaction Start (only needed for the delete itself, but good practice) ---
-	tx, err := s.db.Begin(ctx)
+	tx, err := s.db.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("internal error starting transaction: %w", err)
 	}
 
 	// --- Authorization Check: ONLY Contractor + State Waiting ---
-	isContractor := job.ContractorID != nil && *job.ContractorID == req.UserId
+	isContractor := job.ContractorID != uuid.Nil && job.ContractorID == req.UserId
 	if !isContractor {
 		return ErrForbidden
 	}
-	if invoice.State != models.InvoiceStateWaiting {
+	if invoiceFound.State != invoice.StateWaiting {
 		return ErrInvalidState
 	}
 	// --- End Auth Check ---
@@ -242,12 +243,12 @@ func (s *invoiceService) DeleteInvoice(ctx context.Context, req *dto.DeleteInvoi
 	// Call Repo Delete
 	err = txInvoiceRepo.Delete(ctx, req) // Use txInvoiceRepo
 	if err != nil {
-		tx.Rollback(ctx) // Rollback on error
+		tx.Rollback() // Rollback on error
 		return mapRepoError(err, "deleting invoice")
 	}
 
 	// --- Commit Transaction ---
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		log.Printf("DeleteInvoice: Error committing transaction: %v", err)
 		return fmt.Errorf("internal error committing invoice deletion: %w", err)
 	}
@@ -255,7 +256,7 @@ func (s *invoiceService) DeleteInvoice(ctx context.Context, req *dto.DeleteInvoi
 	return nil
 }
 
-func (s *invoiceService) ListInvoicesByJob(ctx context.Context, req *dto.ListInvoicesByJobRequest) ([]models.Invoice, error) {
+func (s *invoiceService) ListInvoicesByJob(ctx context.Context, req *dto.ListInvoicesByJobRequest) ([]*ent.Invoice, error) {
 	// Fetch Job using s.jobRepo.GetByID(JobID) to verify existence and for auth check.
 	jobReq := dto.GetJobByIDRequest{ID: req.JobID}
 	job, err := s.jobRepo.GetByID(ctx, &jobReq)
@@ -265,11 +266,11 @@ func (s *invoiceService) ListInvoicesByJob(ctx context.Context, req *dto.ListInv
 
 	// Authorization Check: Verify UserID matches job.EmployerID or job.ContractorID.
 	isEmployer := job.EmployerID == req.UserId
-	isContractor := job.ContractorID != nil && *job.ContractorID == req.UserId
+	isContractor := job.ContractorID != uuid.Nil && job.ContractorID == req.UserId
 	if !(isEmployer || isContractor) {
 		return nil, ErrForbidden
 	}
-	
+
 	// Call s.invoiceRepo.ListByJob
 	invoices, err := s.invoiceRepo.ListByJob(ctx, req)
 	if err != nil {

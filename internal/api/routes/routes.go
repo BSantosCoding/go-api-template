@@ -21,12 +21,11 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	// --- Base API Group ---
 	apiV1 := router.Group("/api/v1")
 
-
 	// Create services
-	userService := services.NewUserService(app.RedisClient,app.Config.JWT.Secret, app.Config.JWT.Expiration, app.Config.JWT.RefreshExpiration, app.DBPool)
-	jobService := services.NewJobService(app.DBPool)
-	invoiceService := services.NewInvoiceService(app.DBPool)
-	jobAppService := services.NewJobApplicationService(app.DBPool)
+	userService := services.NewUserService(app.RedisClient, app.Config.JWT.Secret, app.Config.JWT.Expiration, app.Config.JWT.RefreshExpiration, app.EntClient)
+	jobService := services.NewJobService(app.EntClient)
+	invoiceService := services.NewInvoiceService(app.EntClient)
+	jobAppService := services.NewJobApplicationService(app.EntClient)
 
 	//Create handlers
 	userHandler := handlers.NewUserHandler(userService, app.Validator)
@@ -47,7 +46,7 @@ func RegisterRoutes(router *gin.Engine, app *app.Application) {
 	apiV1.GET("/health", handlers.HealthCheck)
 
 	// --- Swagger UI ---)
-	log.Println("Configuring Swagger UI handler") 
+	log.Println("Configuring Swagger UI handler")
 	// Register the Swagger UI handler WITHOUT the explicit URL option.
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }

@@ -193,7 +193,7 @@ func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 
 	appResponses := make([]dto.JobApplicationResponse, 0, len(applications))
 	for _, app := range applications {
-		appResponses = append(appResponses, MapJobApplicationModelToResponse(&app))
+		appResponses = append(appResponses, MapJobApplicationModelToResponse(app))
 	}
 
 	c.JSON(http.StatusOK, appResponses)
@@ -238,7 +238,7 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 	}
 	req.JobID = jobID
 	req.UserID = userID // Pass UserID for authorization check in service
-	
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -267,7 +267,7 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 
 	appResponses := make([]dto.JobApplicationResponse, 0, len(applications))
 	for _, app := range applications {
-		appResponses = append(appResponses, MapJobApplicationModelToResponse(&app))
+		appResponses = append(appResponses, MapJobApplicationModelToResponse(app))
 	}
 
 	c.JSON(http.StatusOK, appResponses)

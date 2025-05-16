@@ -6,23 +6,23 @@ import (
 	"testing"
 	"time"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/job"
 	"go-api-template/internal/services"
 	"go-api-template/internal/storage"          // For storage errors
 	"go-api-template/internal/storage/postgres" // Need concrete repo for setup/assertion
 	"go-api-template/internal/transport/dto"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Helper to create a pointer to a JobState
-func ptrJobState(s models.JobState) *models.JobState { return &s }
+func ptrJobState(s job.State) *job.State { return &s }
 
 // setupJobServiceIntegrationTest initializes the service with a real DB pool.
-func setupJobServiceIntegrationTest(t *testing.T) (context.Context, services.JobService, *pgxpool.Pool) {
+func setupJobServiceIntegrationTest(t *testing.T) (context.Context, services.JobService, *ent.Client) {
 	t.Helper() // Mark as test helper
 	pool, _ := getTestClients(t)
 	// Instantiate the real service using the constructor that creates repos internally
@@ -34,7 +34,7 @@ func setupJobServiceIntegrationTest(t *testing.T) (context.Context, services.Job
 func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
 	defer cleanupTables(t, pool, "users", "jobs")
-	jobRepo := postgres.NewJobRepo(pool)   // Need for verification
+	jobRepo := postgres.NewJobRepo(pool) // Need for verification
 	defer cleanupTables(t, pool, "users", "jobs")
 
 	// Create prerequisite employer
@@ -57,7 +57,7 @@ func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 	assert.Equal(t, createReq.Duration, createdJob.Duration)
 	assert.Equal(t, createReq.InvoiceInterval, createdJob.InvoiceInterval)
 	assert.Equal(t, createReq.EmployerID, createdJob.EmployerID)
-	assert.Equal(t, models.JobStateWaiting, createdJob.State)
+	assert.Equal(t, job.StateWaiting, createdJob.State)
 	assert.Nil(t, createdJob.ContractorID)
 
 	// Verify directly in DB
@@ -66,7 +66,7 @@ func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 	require.NotNil(t, dbJob)
 	assert.Equal(t, createdJob.ID, dbJob.ID)
 	assert.Equal(t, createReq.Rate, dbJob.Rate)
-	assert.Equal(t, models.JobStateWaiting, dbJob.State)
+	assert.Equal(t, job.StateWaiting, dbJob.State)
 
 	// --- Get Job By ID ---
 	getReq := &dto.GetJobByIDRequest{ID: createdJob.ID}
@@ -95,7 +95,7 @@ func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 
 func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	jobRepo := postgres.NewJobRepo(pool)   // Need for verification
+	jobRepo := postgres.NewJobRepo(pool) // Need for verification
 	defer cleanupTables(t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "updatejob-employer@test.com", "UpdateJob Employer")
@@ -103,11 +103,11 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 	contractor := createTestUser(t, ctx, pool, "updatejob-contractor@test.com", "UpdateJob Contractor")
 
 	// Job that can be updated
-	jobWaiting := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
+	jobWaiting := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
 	// Job that cannot be updated (wrong state)
-	jobOngoing := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
+	jobOngoing := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
 	// Job that cannot be updated (contractor assigned, even if waiting - though unlikely state)
-	jobWaitingWithContractor := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, &contractor.ID)
+	jobWaitingWithContractor := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, &contractor.ID)
 
 	tests := []struct {
 		name          string
@@ -174,7 +174,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 				UserID: employer.ID,
 				Rate:   ptrFloat64(130.0),
 			},
-			targetJobID: uuid.New(), // Non-existent job
+			targetJobID: uuid.New(),           // Non-existent job
 			expectedErr: services.ErrNotFound, // mapRepoError maps this
 		},
 	}
@@ -211,9 +211,9 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 				assert.Equal(t, tt.targetJobID, updatedJob.ID)
 				assert.Equal(t, tt.expectedRate, updatedJob.Rate)
 				assert.Equal(t, tt.expectedDur, updatedJob.Duration)
-				assert.Equal(t, models.JobStateWaiting, updatedJob.State) // Should remain waiting
-				assert.Nil(t, updatedJob.ContractorID)                    // Should remain nil
-				require.NotNil(t, initialJob)                              // Should exist for success case
+				assert.Equal(t, job.StateWaiting, updatedJob.State) // Should remain waiting
+				assert.Nil(t, updatedJob.ContractorID)              // Should remain nil
+				require.NotNil(t, initialJob)                       // Should exist for success case
 				assert.True(t, updatedJob.UpdatedAt.After(initialJob.UpdatedAt))
 
 				// Verify in DB
@@ -221,7 +221,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 				require.NoError(t, dbErr)
 				assert.Equal(t, tt.expectedRate, dbJob.Rate)
 				assert.Equal(t, tt.expectedDur, dbJob.Duration)
-				assert.Equal(t, models.JobStateWaiting, dbJob.State)
+				assert.Equal(t, job.StateWaiting, dbJob.State)
 				assert.Nil(t, dbJob.ContractorID)
 			}
 		})
@@ -230,7 +230,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 
 func TestJobService_Integration_UpdateJobState(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	jobRepo := postgres.NewJobRepo(pool)   // Need for verification
+	jobRepo := postgres.NewJobRepo(pool) // Need for verification
 	defer cleanupTables(t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "updstate-employer@test.com", "UpdState Employer")
@@ -238,7 +238,7 @@ func TestJobService_Integration_UpdateJobState(t *testing.T) {
 	otherUser := createTestUser(t, ctx, pool, "updstate-other@test.com", "UpdState Other")
 
 	// We need fresh jobs for each state transition test to ensure isolation
-	createJobForTest := func(state models.JobState, contractorID *uuid.UUID) *models.Job {
+	createJobForTest := func(state job.State, contractorID *uuid.UUID) *ent.Job {
 		return createTestJob(t, ctx, pool, employer.ID, state, contractorID)
 	}
 
@@ -246,80 +246,80 @@ func TestJobService_Integration_UpdateJobState(t *testing.T) {
 		name          string
 		setupFunc     func() uuid.UUID // Returns JobID for the test
 		req           *dto.UpdateJobStateRequest
-		expectedState models.JobState
+		expectedState job.State
 		expectedErr   error
 		errorContains string
 	}{
 		{
 			name: "Success_Employer_OngoingToComplete",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateOngoing, &contractor.ID).ID
+				return createJobForTest(job.StateOngoing, &contractor.ID).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: employer.ID,
-				State:  models.JobStateComplete,
+				State:  job.StateComplete,
 			},
-			expectedState: models.JobStateComplete,
+			expectedState: job.StateComplete,
 			expectedErr:   nil,
 		},
 		{
 			name: "Success_Contractor_OngoingToComplete",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateOngoing, &contractor.ID).ID
+				return createJobForTest(job.StateOngoing, &contractor.ID).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: contractor.ID,
-				State:  models.JobStateComplete,
+				State:  job.StateComplete,
 			},
-			expectedState: models.JobStateComplete,
+			expectedState: job.StateComplete,
 			expectedErr:   nil,
 		},
 		{
 			name: "Success_Employer_CompleteToArchived",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateComplete, &contractor.ID).ID
+				return createJobForTest(job.StateComplete, &contractor.ID).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: employer.ID,
-				State:  models.JobStateArchived,
+				State:  job.StateArchived,
 			},
-			expectedState: models.JobStateArchived,
+			expectedState: job.StateArchived,
 			expectedErr:   nil,
 		},
 		{
 			name: "Error_Forbidden_OtherUser",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateOngoing, &contractor.ID).ID
+				return createJobForTest(job.StateOngoing, &contractor.ID).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: otherUser.ID, // Wrong user
-				State:  models.JobStateComplete,
+				State:  job.StateComplete,
 			},
-			expectedState: models.JobStateOngoing, // Should remain unchanged
+			expectedState: job.StateOngoing, // Should remain unchanged
 			expectedErr:   services.ErrForbidden,
 		},
 		{
 			name: "Error_InvalidTransition_CompleteToWaiting",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateComplete, &contractor.ID).ID
+				return createJobForTest(job.StateComplete, &contractor.ID).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: employer.ID,
-				State:  models.JobStateWaiting, // Invalid transition
+				State:  job.StateWaiting, // Invalid transition
 			},
-			expectedState: models.JobStateComplete, // Should remain unchanged
+			expectedState: job.StateComplete, // Should remain unchanged
 			expectedErr:   services.ErrInvalidTransition,
 		},
 		{
 			name: "Error_InvalidTransition_ManualWaitingToOngoing",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateWaiting, nil).ID
+				return createJobForTest(job.StateWaiting, nil).ID
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: employer.ID,
-				State:  models.JobStateOngoing, // Manual attempt
+				State:  job.StateOngoing, // Manual attempt
 			},
-			expectedState: models.JobStateWaiting, // Should remain unchanged
+			expectedState: job.StateWaiting, // Should remain unchanged
 			expectedErr:   services.ErrInvalidTransition,
 			errorContains: "cannot manually set state to Ongoing",
 		},
@@ -330,7 +330,7 @@ func TestJobService_Integration_UpdateJobState(t *testing.T) {
 			},
 			req: &dto.UpdateJobStateRequest{
 				UserID: employer.ID,
-				State:  models.JobStateComplete,
+				State:  job.StateComplete,
 			},
 			expectedErr: services.ErrNotFound, // mapRepoError maps this
 		},
@@ -377,7 +377,7 @@ func TestJobService_Integration_UpdateJobState(t *testing.T) {
 
 func TestJobService_Integration_DeleteJob(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	jobRepo := postgres.NewJobRepo(pool)   // Need for verification
+	jobRepo := postgres.NewJobRepo(pool) // Need for verification
 	defer cleanupTables(t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "deletejob-employer@test.com", "DeleteJob Employer")
@@ -385,7 +385,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 	contractor := createTestUser(t, ctx, pool, "deletejob-contractor@test.com", "DeleteJob Contractor")
 
 	// We need fresh jobs for each state transition test to ensure isolation
-	createJobForTest := func(state models.JobState, contractorID *uuid.UUID) *models.Job {
+	createJobForTest := func(state job.State, contractorID *uuid.UUID) *ent.Job {
 		return createTestJob(t, ctx, pool, employer.ID, state, contractorID)
 	}
 
@@ -398,7 +398,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 		{
 			name: "Success",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateWaiting, nil).ID
+				return createJobForTest(job.StateWaiting, nil).ID
 			},
 			req: &dto.DeleteJobRequest{
 				UserID: employer.ID, // Correct user
@@ -408,7 +408,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 		{
 			name: "Error_Forbidden_NotEmployer",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateWaiting, nil).ID
+				return createJobForTest(job.StateWaiting, nil).ID
 			},
 			req: &dto.DeleteJobRequest{
 				UserID: otherUser.ID, // Wrong user
@@ -418,7 +418,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 		{
 			name: "Error_InvalidState_NotWaiting",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateOngoing, &contractor.ID).ID
+				return createJobForTest(job.StateOngoing, &contractor.ID).ID
 			},
 			req: &dto.DeleteJobRequest{
 				UserID: employer.ID,
@@ -428,7 +428,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 		{
 			name: "Error_InvalidState_ContractorAssigned",
 			setupFunc: func() uuid.UUID {
-				return createJobForTest(models.JobStateWaiting, &contractor.ID).ID
+				return createJobForTest(job.StateWaiting, &contractor.ID).ID
 			},
 			req: &dto.DeleteJobRequest{
 				UserID: employer.ID,
@@ -485,10 +485,10 @@ func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 	emp2 := createTestUser(t, ctx, pool, "listavail-emp2@test.com", "ListAvail Emp2")
 
 	// Create jobs with different states and rates
-	job1WaitingLowRate := createTestJob(t, ctx, pool, emp1.ID, models.JobStateWaiting, nil) // Rate 50.0
-	job2WaitingHighRate := createTestJob(t, ctx, pool, emp2.ID, models.JobStateWaiting, nil)
+	job1WaitingLowRate := createTestJob(t, ctx, pool, emp1.ID, job.StateWaiting, nil) // Rate 50.0
+	job2WaitingHighRate := createTestJob(t, ctx, pool, emp2.ID, job.StateWaiting, nil)
 	_, _ = postgres.NewJobRepo(pool).Update(ctx, &dto.UpdateJobRequest{ID: job2WaitingHighRate.ID, Rate: ptrFloat64(150.0)}) // Update rate
-	job4WaitingMidRate := createTestJob(t, ctx, pool, emp1.ID, models.JobStateWaiting, nil)
+	job4WaitingMidRate := createTestJob(t, ctx, pool, emp1.ID, job.StateWaiting, nil)
 	_, _ = postgres.NewJobRepo(pool).Update(ctx, &dto.UpdateJobRequest{ID: job4WaitingMidRate.ID, Rate: ptrFloat64(100.0)}) // Update rate
 
 	// --- Test Cases ---
@@ -505,20 +505,20 @@ func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 			expectedIDs:   []uuid.UUID{job1WaitingLowRate.ID, job2WaitingHighRate.ID, job4WaitingMidRate.ID},
 		},
 		{
-			name: "FilterMinRate",
-			req:  dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MinRate: ptrFloat64(75.0)},
+			name:          "FilterMinRate",
+			req:           dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MinRate: ptrFloat64(75.0)},
 			expectedCount: 2, // job2, job4
 			expectedIDs:   []uuid.UUID{job2WaitingHighRate.ID, job4WaitingMidRate.ID},
 		},
 		{
-			name: "FilterMaxRate",
-			req:  dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MaxRate: ptrFloat64(120.0)},
+			name:          "FilterMaxRate",
+			req:           dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MaxRate: ptrFloat64(120.0)},
 			expectedCount: 2, // job1, job4
 			expectedIDs:   []uuid.UUID{job1WaitingLowRate.ID, job4WaitingMidRate.ID},
 		},
 		{
-			name: "FilterMinAndMaxRate",
-			req:  dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MinRate: ptrFloat64(60.0), MaxRate: ptrFloat64(110.0)},
+			name:          "FilterMinAndMaxRate",
+			req:           dto.ListAvailableJobsRequest{Limit: 10, Offset: 0, MinRate: ptrFloat64(60.0), MaxRate: ptrFloat64(110.0)},
 			expectedCount: 1, // job4
 			expectedIDs:   []uuid.UUID{job4WaitingMidRate.ID},
 		},
@@ -543,15 +543,15 @@ func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 			assert.Len(t, jobs, tt.expectedCount)
 
 			// Verify all returned jobs are indeed available
-			for _, job := range jobs {
-				assert.Equal(t, models.JobStateWaiting, job.State)
-				assert.Nil(t, job.ContractorID)
+			for _, j := range jobs {
+				assert.Equal(t, job.StateWaiting, j.State)
+				assert.Nil(t, j.ContractorID)
 				// Verify rate filters if applied
 				if tt.req.MinRate != nil {
-					assert.GreaterOrEqual(t, job.Rate, *tt.req.MinRate)
+					assert.GreaterOrEqual(t, j.Rate, *tt.req.MinRate)
 				}
 				if tt.req.MaxRate != nil {
-					assert.LessOrEqual(t, job.Rate, *tt.req.MaxRate)
+					assert.LessOrEqual(t, j.Rate, *tt.req.MaxRate)
 				}
 			}
 
@@ -580,10 +580,10 @@ func TestJobService_Integration_ListJobsByEmployer(t *testing.T) {
 	con1 := createTestUser(t, ctx, pool, "listemp-con1@test.com", "ListEmp Con1")
 
 	// Jobs for emp1
-	job1Emp1Waiting := createTestJob(t, ctx, pool, emp1.ID, models.JobStateWaiting, nil)
-	job2Emp1Ongoing := createTestJob(t, ctx, pool, emp1.ID, models.JobStateOngoing, &con1.ID)
+	job1Emp1Waiting := createTestJob(t, ctx, pool, emp1.ID, job.StateWaiting, nil)
+	job2Emp1Ongoing := createTestJob(t, ctx, pool, emp1.ID, job.StateOngoing, &con1.ID)
 	// Job for emp2
-	_ = createTestJob(t, ctx, pool, emp2.ID, models.JobStateWaiting, nil)
+	_ = createTestJob(t, ctx, pool, emp2.ID, job.StateWaiting, nil)
 
 	// --- Test Cases ---
 	req := dto.ListJobsByEmployerRequest{
@@ -599,15 +599,15 @@ func TestJobService_Integration_ListJobsByEmployer(t *testing.T) {
 
 	foundJob1 := false
 	foundJob2 := false
-	for _, job := range jobs {
-		assert.Equal(t, emp1.ID, job.EmployerID) // Verify employer ID
-		if job.ID == job1Emp1Waiting.ID {
+	for _, j := range jobs {
+		assert.Equal(t, emp1.ID, j.EmployerID) // Verify employer ID
+		if j.ID == job1Emp1Waiting.ID {
 			foundJob1 = true
-			assert.Equal(t, models.JobStateWaiting, job.State)
+			assert.Equal(t, job.StateWaiting, j.State)
 		}
-		if job.ID == job2Emp1Ongoing.ID {
+		if j.ID == job2Emp1Ongoing.ID {
 			foundJob2 = true
-			assert.Equal(t, models.JobStateOngoing, job.State)
+			assert.Equal(t, job.StateOngoing, j.State)
 		}
 	}
 	assert.True(t, foundJob1, "Waiting job for emp1 not found")
@@ -625,12 +625,12 @@ func TestJobService_Integration_ListJobsByContractor(t *testing.T) {
 	con2 := createTestUser(t, ctx, pool, "listcon-con2@test.com", "ListCon Con2") // Another contractor
 
 	// Jobs for con1
-	job1Con1Ongoing := createTestJob(t, ctx, pool, emp1.ID, models.JobStateOngoing, &con1.ID)
-	job2Con1Complete := createTestJob(t, ctx, pool, emp1.ID, models.JobStateComplete, &con1.ID)
+	job1Con1Ongoing := createTestJob(t, ctx, pool, emp1.ID, job.StateOngoing, &con1.ID)
+	job2Con1Complete := createTestJob(t, ctx, pool, emp1.ID, job.StateComplete, &con1.ID)
 	// Job for con2
-	_ = createTestJob(t, ctx, pool, emp1.ID, models.JobStateOngoing, &con2.ID)
+	_ = createTestJob(t, ctx, pool, emp1.ID, job.StateOngoing, &con2.ID)
 	// Unassigned job
-	_ = createTestJob(t, ctx, pool, emp1.ID, models.JobStateWaiting, nil)
+	_ = createTestJob(t, ctx, pool, emp1.ID, job.StateWaiting, nil)
 
 	// --- Test Cases ---
 	req := dto.ListJobsByContractorRequest{
@@ -646,16 +646,16 @@ func TestJobService_Integration_ListJobsByContractor(t *testing.T) {
 
 	foundJob1 := false
 	foundJob2 := false
-	for _, job := range jobs {
-		require.NotNil(t, job.ContractorID)
-		assert.Equal(t, con1.ID, *job.ContractorID) // Verify contractor ID
-		if job.ID == job1Con1Ongoing.ID {
+	for _, j := range jobs {
+		require.NotNil(t, j.ContractorID)
+		assert.Equal(t, con1.ID, j.ContractorID) // Verify contractor ID
+		if j.ID == job1Con1Ongoing.ID {
 			foundJob1 = true
-			assert.Equal(t, models.JobStateOngoing, job.State)
+			assert.Equal(t, job.StateOngoing, j.State)
 		}
-		if job.ID == job2Con1Complete.ID {
+		if j.ID == job2Con1Complete.ID {
 			foundJob2 = true
-			assert.Equal(t, models.JobStateComplete, job.State)
+			assert.Equal(t, job.StateComplete, j.State)
 		}
 	}
 	assert.True(t, foundJob1, "Ongoing job for con1 not found")

@@ -5,29 +5,29 @@ import (
 	"errors"
 	"testing"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/invoice"
+	"go-api-template/ent/job"
 	"go-api-template/internal/services"
 	"go-api-template/internal/storage"          // For storage errors
 	"go-api-template/internal/storage/postgres" // Need concrete repos for setup/assertion
 	"go-api-template/internal/transport/dto"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // --- Helper Functions ---
 
-
-func ptrInvoiceState(state models.InvoiceState) *models.InvoiceState {
+func ptrInvoiceState(state invoice.State) *invoice.State {
 	return &state
 }
 
 // --- Test Setup ---
 
 // setupInvoiceServiceIntegrationTest initializes the service with a real DB pool.
-func setupInvoiceServiceIntegrationTest(t *testing.T) (context.Context, services.InvoiceService, *pgxpool.Pool) {
+func setupInvoiceServiceIntegrationTest(t *testing.T) (context.Context, services.InvoiceService, *ent.Client) {
 	t.Helper()
 	pool, _ := getTestClients(t)
 	// Instantiate the real service
@@ -37,10 +37,10 @@ func setupInvoiceServiceIntegrationTest(t *testing.T) (context.Context, services
 }
 
 // Helper function to create an invoice for tests
-func createTestInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, jobID uuid.UUID, interval int, value float64, state models.InvoiceState) *models.Invoice {
+func createTestInvoice(t *testing.T, ctx context.Context, pool *ent.Client, jobID uuid.UUID, interval int, value float64, state invoice.State) *ent.Invoice {
 	t.Helper()
 	invoiceRepo := postgres.NewInvoiceRepo(pool)
-	invoice := &models.Invoice{
+	invoice := &ent.Invoice{
 		JobID:          jobID,
 		IntervalNumber: interval,
 		Value:          value,
@@ -64,9 +64,9 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 	contractor := createTestUser(t, ctx, pool, "invoice-contractor@test.com", "Invoice Contractor")
 	otherUser := createTestUser(t, ctx, pool, "invoice-other@test.com", "Invoice Other")
 
-	jobOngoing := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
-	jobWaiting := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, &contractor.ID)
-	jobPartial := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
+	jobOngoing := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
+	jobWaiting := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, &contractor.ID)
+	jobPartial := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
 	jobPartial.Duration = 25 // e.g., 2 full intervals (10) + 1 partial (5)
 	_, err := postgres.NewJobRepo(pool).Update(ctx, &dto.UpdateJobRequest{ID: jobPartial.ID, Duration: &jobPartial.Duration})
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 			targetJobID: jobOngoing.ID, // Use the job that already has invoice 1
 			setupFunc: func() {
 				// Ensure interval 1 exists for jobOngoing
-				_ = createTestInvoice(t, ctx, pool, jobOngoing.ID, 1, 500, models.InvoiceStateWaiting)
+				_ = createTestInvoice(t, ctx, pool, jobOngoing.ID, 1, 500, invoice.StateWaiting)
 			},
 			expectedValue:    50.0 * 10, // 50 rate * 10 interval
 			expectedInterval: 2,
@@ -113,7 +113,7 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 			targetJobID: jobPartial.ID, // Use partial job, assume interval 1 & 2 exist now
 			setupFunc: func() {
 				// Ensure interval 1 and 2 exist for jobPartial
-				_ = createTestInvoice(t, ctx, pool, jobPartial.ID, 2, 500, models.InvoiceStateWaiting)
+				_ = createTestInvoice(t, ctx, pool, jobPartial.ID, 2, 500, invoice.StateWaiting)
 			},
 			expectedValue:    50.0 * 5, // 50 rate * 5 remaining hours
 			expectedInterval: 3,
@@ -162,7 +162,7 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 
 			tt.req.JobID = tt.targetJobID // Set the job ID for the request
 
-			invoice, err := invoiceService.CreateInvoice(ctx, tt.req)
+			invoiceCreated, err := invoiceService.CreateInvoice(ctx, tt.req)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -170,24 +170,24 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 				if tt.errorContains != "" {
 					assert.Contains(t, err.Error(), tt.errorContains)
 				}
-				assert.Nil(t, invoice)
+				assert.Nil(t, invoiceCreated)
 			} else {
 				require.NoError(t, err)
-				require.NotNil(t, invoice)
-				assert.Equal(t, tt.targetJobID, invoice.JobID)
-				assert.Equal(t, tt.expectedInterval, invoice.IntervalNumber)
-				assert.Equal(t, tt.expectedValue, invoice.Value)
-				assert.Equal(t, models.InvoiceStateWaiting, invoice.State)
-				assert.NotEqual(t, uuid.Nil, invoice.ID)
+				require.NotNil(t, invoiceCreated)
+				assert.Equal(t, tt.targetJobID, invoiceCreated.JobID)
+				assert.Equal(t, tt.expectedInterval, invoiceCreated.IntervalNumber)
+				assert.Equal(t, tt.expectedValue, invoiceCreated.Value)
+				assert.Equal(t, invoice.StateWaiting, invoiceCreated.State)
+				assert.NotEqual(t, uuid.Nil, invoiceCreated.ID)
 
 				// Verify in DB
-				dbInvoice, dbErr := invoiceRepo.GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoice.ID})
+				dbInvoice, dbErr := invoiceRepo.GetByID(ctx, &dto.GetInvoiceByIDRequest{ID: invoiceCreated.ID})
 				require.NoError(t, dbErr)
 				require.NotNil(t, dbInvoice)
-				assert.Equal(t, invoice.ID, dbInvoice.ID)
+				assert.Equal(t, invoiceCreated.ID, dbInvoice.ID)
 				assert.Equal(t, tt.expectedInterval, dbInvoice.IntervalNumber)
 				assert.Equal(t, tt.expectedValue, dbInvoice.Value)
-				assert.Equal(t, models.InvoiceStateWaiting, dbInvoice.State)
+				assert.Equal(t, invoice.StateWaiting, dbInvoice.State)
 			}
 		})
 	}
@@ -200,8 +200,8 @@ func TestInvoiceService_Integration_GetInvoiceByID(t *testing.T) {
 	employer := createTestUser(t, ctx, pool, "getinv-employer@test.com", "GetInv Employer")
 	contractor := createTestUser(t, ctx, pool, "getinv-contractor@test.com", "GetInv Contractor")
 	otherUser := createTestUser(t, ctx, pool, "getinv-other@test.com", "GetInv Other")
-	job := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
-	invoice := createTestInvoice(t, ctx, pool, job.ID, 1, 500, models.InvoiceStateWaiting) // Use helper
+	job := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
+	invoice := createTestInvoice(t, ctx, pool, job.ID, 1, 500, invoice.StateWaiting) // Use helper
 
 	tests := []struct {
 		name        string
@@ -262,56 +262,56 @@ func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 	employer := createTestUser(t, ctx, pool, "updinv-employer@test.com", "UpdInv Employer")
 	contractor := createTestUser(t, ctx, pool, "updinv-contractor@test.com", "UpdInv Contractor")
 	// otherUser := createTestUser(t, ctx, pool, "updinv-other@test.com", "UpdInv Other") // Not needed for these cases
-	job := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
+	job := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
 
 	tests := []struct {
-		name           string
-		setupFunc      func() uuid.UUID // Function to setup/get the target invoice ID for the test
-		req            *dto.UpdateInvoiceStateRequest
-		expectedState  models.InvoiceState // Expected final state (or initial state if error)
-		expectedErr    error
-		errorContains  string
+		name          string
+		setupFunc     func() uuid.UUID // Function to setup/get the target invoice ID for the test
+		req           *dto.UpdateInvoiceStateRequest
+		expectedState invoice.State // Expected final state (or initial state if error)
+		expectedErr   error
+		errorContains string
 	}{
 		{
 			name: "Success_WaitingToComplete",
 			setupFunc: func() uuid.UUID {
 				// Create a fresh waiting invoice for this test
-				return createTestInvoice(t, ctx, pool, job.ID, 1, 500, models.InvoiceStateWaiting).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 1, 500, invoice.StateWaiting).ID
 			},
 			req: &dto.UpdateInvoiceStateRequest{
-				NewState: models.InvoiceStateComplete,
+				NewState: invoice.StateComplete,
 				UserId:   employer.ID, // Correct user
 			},
 			// targetInvoiceID will be set by setupFunc
-			expectedState: models.InvoiceStateComplete,
+			expectedState: invoice.StateComplete,
 			expectedErr:   nil,
 		},
 		{
 			name: "Error_Forbidden_NotEmployer",
 			setupFunc: func() uuid.UUID {
 				// Ensure a waiting invoice exists for this check
-				return createTestInvoice(t, ctx, pool, job.ID, 2, 500, models.InvoiceStateWaiting).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 2, 500, invoice.StateWaiting).ID
 			},
 			req: &dto.UpdateInvoiceStateRequest{
-				NewState: models.InvoiceStateComplete,
+				NewState: invoice.StateComplete,
 				UserId:   contractor.ID, // Employer cannot update state
 			},
 			// targetInvoiceID will be set by setupFunc
-			expectedState: models.InvoiceStateWaiting, // Should not change
-			expectedErr:   services.ErrForbidden,      // Service correctly forbids non-contractor
+			expectedState: invoice.StateWaiting,  // Should not change
+			expectedErr:   services.ErrForbidden, // Service correctly forbids non-contractor
 		},
 		{
 			name: "Error_InvalidTransition_CompleteToWaiting",
 			setupFunc: func() uuid.UUID {
 				// Create a fresh complete invoice for this test
-				return createTestInvoice(t, ctx, pool, job.ID, 3, 500, models.InvoiceStateComplete).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 3, 500, invoice.StateComplete).ID
 			},
 			req: &dto.UpdateInvoiceStateRequest{
-				NewState: models.InvoiceStateWaiting,
+				NewState: invoice.StateWaiting,
 				UserId:   employer.ID,
 			},
 			// targetInvoiceID will be set by setupFunc
-			expectedState: models.InvoiceStateComplete, // Should not change
+			expectedState: invoice.StateComplete, // Should not change
 			expectedErr:   services.ErrInvalidTransition,
 		},
 		{
@@ -320,7 +320,7 @@ func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 				return uuid.New() // Non-existent ID
 			},
 			req: &dto.UpdateInvoiceStateRequest{
-				NewState: models.InvoiceStateComplete,
+				NewState: invoice.StateComplete,
 				UserId:   contractor.ID,
 			},
 			// targetInvoiceID will be set by setupFunc
@@ -378,7 +378,7 @@ func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 	employer := createTestUser(t, ctx, pool, "delinv-employer@test.com", "DelInv Employer")
 	contractor := createTestUser(t, ctx, pool, "delinv-contractor@test.com", "DelInv Contractor")
 	// otherUser := createTestUser(t, ctx, pool, "delinv-other@test.com", "DelInv Other") // Not needed
-	job := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID)
+	job := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID)
 
 	tests := []struct {
 		name          string
@@ -390,7 +390,7 @@ func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 		{
 			name: "Success",
 			setupFunc: func() uuid.UUID {
-				return createTestInvoice(t, ctx, pool, job.ID, 1, 500, models.InvoiceStateWaiting).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 1, 500, invoice.StateWaiting).ID
 			},
 			req: &dto.DeleteInvoiceRequest{
 				UserId: contractor.ID, // Correct user
@@ -402,7 +402,7 @@ func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 			name: "Error_Forbidden_NotContractor",
 			setupFunc: func() uuid.UUID {
 				// Ensure a waiting invoice exists for this check
-				return createTestInvoice(t, ctx, pool, job.ID, 2, 500, models.InvoiceStateWaiting).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 2, 500, invoice.StateWaiting).ID
 			},
 			req: &dto.DeleteInvoiceRequest{
 				UserId: employer.ID, // Employer cannot delete
@@ -414,7 +414,7 @@ func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 			name: "Error_InvalidState_NotWaiting",
 			setupFunc: func() uuid.UUID {
 				// Ensure a complete invoice exists for this check
-				return createTestInvoice(t, ctx, pool, job.ID, 3, 500, models.InvoiceStateComplete).ID
+				return createTestInvoice(t, ctx, pool, job.ID, 3, 500, invoice.StateComplete).ID
 			},
 			req: &dto.DeleteInvoiceRequest{
 				UserId: contractor.ID, // Correct user, wrong state
@@ -480,24 +480,24 @@ func TestInvoiceService_Integration_ListInvoicesByJob(t *testing.T) {
 	contractor1 := createTestUser(t, ctx, pool, "listinv-con1@test.com", "ListInv Contractor 1")
 	otherUser := createTestUser(t, ctx, pool, "listinv-other@test.com", "ListInv Other")
 
-	job1 := createTestJob(t, ctx, pool, employer1.ID, models.JobStateOngoing, &contractor1.ID)
-	_ = createTestInvoice(t, ctx, pool, job1.ID, 1, 500, models.InvoiceStateWaiting)
-	_ = createTestInvoice(t, ctx, pool, job1.ID, 2, 500, models.InvoiceStateComplete)
-	_ = createTestInvoice(t, ctx, pool, job1.ID, 3, 500, models.InvoiceStateWaiting)
+	job1 := createTestJob(t, ctx, pool, employer1.ID, job.StateOngoing, &contractor1.ID)
+	_ = createTestInvoice(t, ctx, pool, job1.ID, 1, 500, invoice.StateWaiting)
+	_ = createTestInvoice(t, ctx, pool, job1.ID, 2, 500, invoice.StateComplete)
+	_ = createTestInvoice(t, ctx, pool, job1.ID, 3, 500, invoice.StateWaiting)
 
 	// Create another job/invoice to ensure filtering works
 	employer2 := createTestUser(t, ctx, pool, "listinv-emp2@test.com", "ListInv Employer 2")
-	job2 := createTestJob(t, ctx, pool, employer2.ID, models.JobStateOngoing, &contractor1.ID) // Same contractor
-	_ = createTestInvoice(t, ctx, pool, job2.ID, 1, 600, models.InvoiceStateWaiting)
+	job2 := createTestJob(t, ctx, pool, employer2.ID, job.StateOngoing, &contractor1.ID) // Same contractor
+	_ = createTestInvoice(t, ctx, pool, job2.ID, 1, 600, invoice.StateWaiting)
 
 	// --- Test Cases ---
 	tests := []struct {
-		name             string
-		req              dto.ListInvoicesByJobRequest
-		expectedCount    int
-		expectedStates   []models.InvoiceState // Optional: check states if count > 0
-		expectedErr      error
-		errorContains    string
+		name           string
+		req            dto.ListInvoicesByJobRequest
+		expectedCount  int
+		expectedStates []invoice.State // Optional: check states if count > 0
+		expectedErr    error
+		errorContains  string
 	}{
 		{
 			name: "Success_ListAll_AsEmployer",
@@ -524,11 +524,11 @@ func TestInvoiceService_Integration_ListInvoicesByJob(t *testing.T) {
 			req: dto.ListInvoicesByJobRequest{
 				JobID:  job1.ID,
 				UserId: employer1.ID,
-				State:  ptrInvoiceState(models.InvoiceStateWaiting), // Filter by Waiting
+				State:  ptrInvoiceState(invoice.StateWaiting), // Filter by Waiting
 				Limit:  10, Offset: 0,
 			},
 			expectedCount:  2,
-			expectedStates: []models.InvoiceState{models.InvoiceStateWaiting, models.InvoiceStateWaiting},
+			expectedStates: []invoice.State{invoice.StateWaiting, invoice.StateWaiting},
 			expectedErr:    nil,
 		},
 		{
@@ -536,11 +536,11 @@ func TestInvoiceService_Integration_ListInvoicesByJob(t *testing.T) {
 			req: dto.ListInvoicesByJobRequest{
 				JobID:  job1.ID,
 				UserId: employer1.ID,
-				State:  ptrInvoiceState(models.InvoiceStateComplete), // Filter by Complete
+				State:  ptrInvoiceState(invoice.StateComplete), // Filter by Complete
 				Limit:  10, Offset: 0,
 			},
 			expectedCount:  1,
-			expectedStates: []models.InvoiceState{models.InvoiceStateComplete},
+			expectedStates: []invoice.State{invoice.StateComplete},
 			expectedErr:    nil,
 		},
 		{

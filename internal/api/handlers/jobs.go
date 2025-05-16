@@ -18,14 +18,14 @@ import (
 
 // JobHandler holds dependencies for job operations.
 type JobHandler struct {
-	service services.JobService 
+	service   services.JobService
 	validator *validator.Validate
 }
 
 // NewJobHandler creates a new JobHandler.
 func NewJobHandler(service services.JobService, validate *validator.Validate) *JobHandler {
 	return &JobHandler{
-		service: service,
+		service:   service,
 		validator: validate,
 	}
 }
@@ -154,13 +154,13 @@ func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
 		return
 	}
 
-	// Explicitly validate the struct if needed 
+	// Explicitly validate the struct if needed
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-	// Set defaults if binding didn't 
+	// Set defaults if binding didn't
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}
@@ -179,7 +179,7 @@ func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
 	// Map results to []dto.JobResponse
 	jobResponses := make([]dto.JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(job))
 	}
 
 	// Return JSON response
@@ -226,8 +226,12 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-	if req.Limit <= 0 { req.Limit = 10 }
-	if req.Offset < 0 { req.Offset = 0 }
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
 
 	// Call h.repo.ListByEmployer
 	jobs, err := h.service.ListJobsByEmployer(c.Request.Context(), &req)
@@ -240,7 +244,7 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 	// Map results to []dto.JobResponse
 	jobResponses := make([]dto.JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(job))
 	}
 
 	// Return JSON response
@@ -287,8 +291,12 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
 		return
 	}
-	if req.Limit <= 0 { req.Limit = 10 }
-	if req.Offset < 0 { req.Offset = 0 }
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
 
 	// Call h.repo.ListByContractor
 	jobs, err := h.service.ListJobsByContractor(c.Request.Context(), &req)
@@ -301,7 +309,7 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 	// Map results to []dto.JobResponse
 	jobResponses := make([]dto.JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		jobResponses = append(jobResponses, MapJobModelToJobResponse(&job))
+		jobResponses = append(jobResponses, MapJobModelToJobResponse(job))
 	}
 
 	// Return JSON response
@@ -411,7 +419,7 @@ func (h *JobHandler) UpdateJobState(c *gin.Context) {
 	}
 	req.JobID = jobID
 	req.UserID = userID
-	
+
 	if err := h.validator.Struct(req); err != nil {
 		validationErrors := FormatValidationErrors(err.(validator.ValidationErrors))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": validationErrors})
@@ -472,7 +480,7 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 	// Call h.repo.Delete
 	err = h.service.DeleteJob(c.Request.Context(), &req)
 	if err != nil {
-		if errors.Is(err, services.ErrNotFound) { 
+		if errors.Is(err, services.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
 		} else if errors.Is(err, services.ErrForbidden) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Cannot delete job in current state"})

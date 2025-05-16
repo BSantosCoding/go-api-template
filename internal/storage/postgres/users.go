@@ -2,203 +2,156 @@ package postgres
 
 import (
 	"context"
-	"errors" // Import errors package
 	"fmt"
-	"log" // For logging errors
+	"log"
 
-	"go-api-template/internal/models"
-	"go-api-template/internal/storage" // Import the interface package
+	"go-api-template/ent"
+	"go-api-template/ent/user"
+
+	// Remove internal models import
+	// "go-api-template/internal/models"
+	"go-api-template/internal/storage"
 	"go-api-template/internal/transport/dto"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn" // For checking specific errors
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// UserRepo implements the storage.UserRepository interface using PostgreSQL.
+// UserRepo implements the storage.UserRepository interface using Ent.
 type UserRepo struct {
-	db Querier
+	client *ent.Client
 }
 
 // NewUserRepo creates a new UserRepo.
-func NewUserRepo(db *pgxpool.Pool) *UserRepo {
-	return &UserRepo{db: db}
+func NewUserRepo(client *ent.Client) *UserRepo {
+	return &UserRepo{client: client}
 }
 
-// WithTx creates a new UserRepo with the transaction.
-func (r *UserRepo) WithTx(tx pgx.Tx) storage.UserRepository {
-	return &UserRepo{db: tx}
+func (r *UserRepo) WithTx(tx *ent.Tx) storage.UserRepository {
+	return &UserRepo{client: tx.Client()}
 }
 
-// Compile-time check to ensure UserRepo implements UserRepository
 var _ storage.UserRepository = (*UserRepo)(nil)
 
-func (r *UserRepo) GetAll(ctx context.Context) ([]models.User, error) {
-	query := `SELECT id, name, email, created_at, updated_at FROM users ORDER BY name ASC;` // Select needed fields
-	rows, err := r.db.Query(ctx, query)
+// GetAll retrieves all users using Ent, returning a slice of *ent.User.
+func (r *UserRepo) GetAll(ctx context.Context) ([]*ent.User, error) {
+	entUsers, err := r.client.User.
+		Query().
+		Order(ent.Asc(user.FieldName)). // Order by name (adjust field name if different in schema)
+		All(ctx)
 	if err != nil {
-		log.Printf("Error querying all users: %v\n", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Scan manually or use RowToStructByName if all struct fields are selected
-	users, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.User, error) {
-		var u models.User
-		// Explicitly scan only the selected columns
-		err := row.Scan(&u.ID, &u.Name, &u.Email, &u.CreatedAt, &u.UpdatedAt)
-		return u, err
-	})
-	if err != nil {
-		log.Printf("Error scanning users: %v\n", err)
+		log.Printf("Error querying all users with Ent: %v\n", err)
 		return nil, err
 	}
 
-	// Return empty slice instead of nil if no users found
-	if users == nil {
-		users = []models.User{}
-	}
-
-	return users, nil
+	// Return Ent users directly
+	return entUsers, nil
 }
 
-func (r *UserRepo) GetByID(ctx context.Context, id *dto.GetUserByIdRequest) (*models.User, error) {
-	query := `SELECT id, name, email FROM users WHERE id = $1;`
-	row := r.db.QueryRow(ctx, query, id.ID)
+// GetByID retrieves a single user by ID using Ent, returning *ent.User.
+func (r *UserRepo) GetByID(ctx context.Context, id *dto.GetUserByIdRequest) (*ent.User, error) {
+	entUser, err := r.client.User.
+		Query().
+		Where(user.IDEQ(id.ID)).
+		Only(ctx) // Use Only() to expect exactly one result
 
-	var user models.User
-	err := row.Scan(&user.ID, &user.Name, &user.Email)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, storage.ErrNotFound // Use a custom error type later if needed
+		if ent.IsNotFound(err) {
+			log.Printf("User not found with ID: %s\n", id.ID)
+			return nil, storage.ErrNotFound // Map Ent NotFound error
 		}
-		log.Printf("Error scanning user by ID %s: %v\n", id, err)
+		log.Printf("Error getting user by ID %s with Ent: %v\n", id.ID, err)
 		return nil, err
 	}
-	return &user, nil
+
+	return entUser, nil
 }
 
-// GetByEmail retrieves a single user by Email, including the password hash.
-func (r *UserRepo) GetByEmail(ctx context.Context, email *dto.GetUserByEmailRequest) (*models.User, error) {
-	// Select all fields needed for authentication comparison
-	query := `SELECT id, name, email, password_hash, created_at, updated_at FROM users WHERE email = $1;`
-	row := r.db.QueryRow(ctx, query, email.Email)
-
-	var user models.User
-	// Scan all fields, including password hash
-	err := row.Scan(
-		&user.ID,
-		&user.Name,
-		&user.Email,
-		&user.PasswordHash, // Include password hash
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	)
+// GetByEmail retrieves a single user by Email using Ent, returning *ent.User (including password hash).
+func (r *UserRepo) GetByEmail(ctx context.Context, emailReq *dto.GetUserByEmailRequest) (*ent.User, error) {
+	entUser, err := r.client.User.
+		Query().
+		Where(user.EmailEQ(emailReq.Email)).
+		Only(ctx) // Use Only() to expect exactly one result
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			log.Printf("User not found with email: %s\n", email.Email)
-			return nil, storage.ErrNotFound // Use custom error
+		if ent.IsNotFound(err) {
+			log.Printf("User not found with email: %s\n", emailReq.Email)
+			return nil, storage.ErrNotFound // Map Ent NotFound error
 		}
-		log.Printf("Error scanning user by email %s: %v\n", email.Email, err)
+		log.Printf("Error getting user by email %s with Ent: %v\n", emailReq.Email, err)
 		return nil, err
 	}
-	return &user, nil
+
+	return entUser, nil
 }
 
-func (r *UserRepo) Create(ctx context.Context, userReq *dto.CreateUserRequest) (*models.User, error) {
-	// --- Password Hashing ---
+// Create a new user using Ent, returning the created *ent.User.
+func (r *UserRepo) Create(ctx context.Context, userReq *dto.CreateUserRequest) (*ent.User, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(userReq.Password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error hashing password for email %s: %v\n", userReq.Email, err)
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
-	// ------------------------
 
-	// Include password_hash in the insert statement
-	// Use NOW() for timestamps assuming DB columns are TIMESTAMPTZ
-	sql := `INSERT INTO users (id, name, email, password_hash, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, NOW(), NOW())
-             RETURNING id, name, email, created_at, updated_at` // Return safe fields
-
-	createdUser := &models.User{} // To store the returned values
-
-	// Execute the query, passing the hashed password
-	err = r.db.QueryRow(ctx, sql, uuid.New(), userReq.Name, userReq.Email, string(hashedPassword)).Scan(
-		&createdUser.ID,
-		&createdUser.Name,
-		&createdUser.Email,
-		&createdUser.CreatedAt,
-		&createdUser.UpdatedAt,
-		// Note: We are NOT returning/scanning the password_hash back
-	)
+	entUser, err := r.client.User.
+		Create().
+		SetEmail(userReq.Email).
+		SetPasswordHash(string(hashedPassword)).
+		SetName(userReq.Name).
+		Save(ctx) // Save the new user entity
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
-			// Check constraint name to be more specific (optional but recommended)
-			// Common constraint names: users_email_key, users_email_unique, users_pkey
-			if pgErr.ConstraintName == "users_email_key" || pgErr.ConstraintName == "users_email_unique" {
-				log.Printf("Attempted to create user with duplicate email %s: %v\n", userReq.Email, err)
-				return nil, storage.ErrDuplicateEmail // Specific error for email
-			}
-			// Could be duplicate ID or other unique constraint
-			log.Printf("Attempted to create user with duplicate unique field (ID or other): %v\n", err)
-			return nil, storage.ErrConflict // General conflict error
+		if ent.IsConstraintError(err) {
+			log.Printf("Attempted to create user with duplicate email %s: %v\n", userReq.Email, err)
+			return nil, storage.ErrDuplicateEmail // Map to specific duplicate email error
 		}
-		// Log and return other errors
-		log.Printf("Error creating user with email %s: %v\n", userReq.Email, err)
+		log.Printf("Error creating user with email %s using Ent: %v\n", userReq.Email, err)
 		return nil, err
 	}
 
-	log.Printf("User created successfully with ID: %s", createdUser.ID)
-	return createdUser, nil
+	log.Printf("User created successfully with ID: %s", entUser.ID)
+
+	return entUser, nil
 }
 
-func (r *UserRepo) Update(ctx context.Context, user *dto.UpdateUserRequest) (*models.User, error) {
-	sql := `UPDATE users
-             SET name = $1
-             WHERE id = $2
-             RETURNING id, name, email, created_at, updated_at` // Return all needed fields
+// Update an existing user using Ent, returning the updated *ent.User.
+func (r *UserRepo) Update(ctx context.Context, userReq *dto.UpdateUserRequest) (*ent.User, error) {
+	updateBuilder := r.client.User.UpdateOneID(userReq.ID)
 
-	updatedUser := &models.User{}
+	// Use nil check for optional fields from DTO pointers
+	if userReq.Name != nil {
+		updateBuilder.SetName(*userReq.Name)
+	}
+	// If you allowed email or password updates, add similar checks here
 
-	err := r.db.QueryRow(ctx, sql, user.Name, user.ID).Scan( // Pass values for SET and WHERE
-        &updatedUser.ID,
-        &updatedUser.Name,
-        &updatedUser.Email,
-        &updatedUser.CreatedAt,
-        &updatedUser.UpdatedAt, // This will contain the trigger-set value
-    )
+	entUser, err := updateBuilder.Save(ctx) // Save the changes
 	if err != nil {
-		// Check specifically for ErrNoRows on UPDATE...RETURNING
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, storage.ErrNotFound
+		if ent.IsNotFound(err) {
+			log.Printf("Attempted to update non-existent user %s\n", userReq.ID)
+			return nil, storage.ErrNotFound // Map Ent NotFound error
 		}
-		// Check for unique constraint violation on update (e.g., email)
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			log.Printf("Attempted to update user %s resulting in duplicate email: %v\n", user.ID, err)
-			return nil, storage.ErrConflict
+		if ent.IsConstraintError(err) {
+			log.Printf("Attempted to update user %s resulting in constraint violation: %v\n", userReq.ID, err)
+			return nil, storage.ErrConflict // Map Ent constraint violation error
 		}
-		log.Printf("Error updating user %s: %v\n", user.ID, err)
+		log.Printf("Error updating user %s with Ent: %v\n", userReq.ID, err)
 		return nil, err
 	}
 
-	return updatedUser, nil
+	// Return updated Ent user directly
+	return entUser, nil
 }
 
-func (r *UserRepo) Delete(ctx context.Context, id *dto.DeleteUserRequest) error {
-	query := `DELETE FROM users WHERE id = $1;`
-
-	cmdTag, err := r.db.Exec(ctx, query, id.ID)
+// Delete a user by ID using Ent.
+func (r *UserRepo) Delete(ctx context.Context, idReq *dto.DeleteUserRequest) error {
+	err := r.client.User.
+		DeleteOneID(idReq.ID).
+		Exec(ctx) // Execute the delete operation
 	if err != nil {
-		log.Printf("Error deleting user %s: %v\n", id, err)
+		if ent.IsNotFound(err) {
+			log.Printf("Attempted to delete non-existent user %s\n", idReq.ID)
+			return storage.ErrNotFound // Map Ent NotFound error
+		}
+		log.Printf("Error deleting user %s with Ent: %v\n", idReq.ID, err)
 		return err
-	}
-
-	if cmdTag.RowsAffected() == 0 {
-		return storage.ErrNotFound // No user found with that ID
 	}
 
 	return nil

@@ -17,7 +17,7 @@ import (
 
 // UserHandler holds the repository dependency for user operations
 type UserHandler struct {
-	service services.UserService // Use the service interface
+	service   services.UserService // Use the service interface
 	validator *validator.Validate
 }
 
@@ -47,7 +47,7 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 	userResponses := make([]dto.UserResponse, 0, len(users))
 	for _, user := range users {
 		// Need to pass a pointer if the helper expects one
-		userResponses = append(userResponses, MapUserModelToUserResponse(&user))
+		userResponses = append(userResponses, MapUserModelToUserResponse(user))
 	}
 
 	c.JSON(http.StatusOK, userResponses)
@@ -129,7 +129,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		// Check for specific duplicate email error
 		if errors.Is(err, storage.ErrDuplicateEmail) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Email address already registered"})
-		// Check for general conflict (e.g., if ID was somehow duplicated, though unlikely now)
+			// Check for general conflict (e.g., if ID was somehow duplicated, though unlikely now)
 		} else if errors.Is(err, storage.ErrConflict) {
 			c.JSON(http.StatusConflict, gin.H{"error": "User conflict"})
 		} else {
@@ -352,11 +352,11 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	userDelete.ID = uuid.MustParse(id)
 
 	if err := h.validator.Struct(userDelete); err != nil {
-        // Handle validation errors
-        validationErrors := err.(validator.ValidationErrors)
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": FormatValidationErrors(validationErrors)})
-        return
-    }
+		// Handle validation errors
+		validationErrors := err.(validator.ValidationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": FormatValidationErrors(validationErrors)})
+		return
+	}
 
 	requestingUserId, err := middleware.GetUserIDFromContext(c)
 	if err != nil {

@@ -5,14 +5,15 @@ import (
 	"errors"
 	"testing"
 
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/job"
+	"go-api-template/ent/jobapplication"
 	"go-api-template/internal/services"
 	"go-api-template/internal/storage"          // For storage errors
 	"go-api-template/internal/storage/postgres" // Need concrete repos for setup/assertion
 	"go-api-template/internal/transport/dto"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ import (
 // --- Test Setup ---
 
 // setupJobApplicationServiceIntegrationTest initializes the service with a real DB pool.
-func setupJobApplicationServiceIntegrationTest(t *testing.T) (context.Context, services.JobApplicationService, *pgxpool.Pool) {
+func setupJobApplicationServiceIntegrationTest(t *testing.T) (context.Context, services.JobApplicationService, *ent.Client) {
 	t.Helper()
 	pool, _ := getTestClients(t)
 	// Instantiate the real service
@@ -30,7 +31,7 @@ func setupJobApplicationServiceIntegrationTest(t *testing.T) (context.Context, s
 }
 
 // Helper function to create an application for tests
-func createTestApplication(t *testing.T, ctx context.Context, pool *pgxpool.Pool, jobID, contractorID uuid.UUID, state models.JobApplicationState) *models.JobApplication {
+func createTestApplication(t *testing.T, ctx context.Context, pool *ent.Client, jobID, contractorID uuid.UUID, state jobapplication.State) *ent.JobApplication {
 	t.Helper()
 	appRepo := postgres.NewJobApplicationRepo(pool)
 	appReq := &dto.CreateJobApplicationRequest{
@@ -50,7 +51,7 @@ func createTestApplication(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	}
 	require.NotNil(t, app)
 
-	if state != models.JobApplicationWaiting && app.State != state {
+	if state != jobapplication.StateWaiting && app.State != state {
 		updateReq := dto.UpdateJobApplicationStateRequest{ID: app.ID, State: state}
 		updatedApp, updateErr := appRepo.UpdateState(ctx, &updateReq)
 		require.NoError(t, updateErr, "Failed to update test application state")
@@ -68,13 +69,13 @@ func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 
 	employer := createTestUser(t, ctx, pool, "apply-employer@test.com", "Apply Employer")
 	contractor := createTestUser(t, ctx, pool, "apply-contractor@test.com", "Apply Contractor")
-	jobWaiting := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-	jobOngoing := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor.ID) // Create an ongoing job for failure case
+	jobWaiting := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+	jobOngoing := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor.ID) // Create an ongoing job for failure case
 
 	tests := []struct {
 		name          string
 		req           *dto.ApplyToJobRequest
-		expectedState models.JobApplicationState
+		expectedState jobapplication.State
 		expectedErr   error
 		errorContains string
 	}{
@@ -84,7 +85,7 @@ func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 				JobID:        jobWaiting.ID,
 				ContractorID: contractor.ID,
 			},
-			expectedState: models.JobApplicationWaiting,
+			expectedState: jobapplication.StateWaiting,
 			expectedErr:   nil,
 		},
 		{
@@ -171,7 +172,7 @@ func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 
 func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
-	jobRepo := postgres.NewJobRepo(pool)     // For verification
+	jobRepo := postgres.NewJobRepo(pool)            // For verification
 	appRepo := postgres.NewJobApplicationRepo(pool) // For verification
 	defer cleanupTables(t, pool, "users", "jobs", "job_application")
 
@@ -188,36 +189,36 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 		name                 string
 		setupFunc            func() (targetAppID, otherAppID, targetJobID uuid.UUID) // Returns IDs needed for the test
 		req                  *dto.AcceptApplicationRequest
-		expectedJobState     models.JobState
+		expectedJobState     job.State
 		expectedContractorID *uuid.UUID
-		expectedApp1State    models.JobApplicationState // State of app being accepted/targeted
-		expectedApp2State    models.JobApplicationState // State of the *other* waiting app (if applicable)
+		expectedApp1State    jobapplication.State // State of app being accepted/targeted
+		expectedApp2State    jobapplication.State // State of the *other* waiting app (if applicable)
 		expectedErr          error
 		errorContains        string
 	}{
 		{
 			name: "Success",
 			setupFunc: func() (uuid.UUID, uuid.UUID, uuid.UUID) {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app1 := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, models.JobApplicationWaiting)
-				app2 := createTestApplication(t, ctx, pool, job.ID, contractor2.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app1 := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, jobapplication.StateWaiting)
+				app2 := createTestApplication(t, ctx, pool, job.ID, contractor2.ID, jobapplication.StateWaiting)
 				return app1.ID, app2.ID, job.ID
 			},
 			req: &dto.AcceptApplicationRequest{
 				// ApplicationID set by setupFunc
 				UserID: employer.ID, // Correct employer
 			},
-			expectedJobState:     models.JobStateOngoing,
+			expectedJobState:     job.StateOngoing,
 			expectedContractorID: &contractor1.ID,
-			expectedApp1State:    models.JobApplicationAccepted,
-			expectedApp2State:    models.JobApplicationRejected, // Other app should be rejected
+			expectedApp1State:    jobapplication.StateAccepted,
+			expectedApp2State:    jobapplication.StateRejected, // Other app should be rejected
 			expectedErr:          nil,
 		},
 		{
 			name: "Error_Forbidden_NotEmployer",
 			setupFunc: func() (uuid.UUID, uuid.UUID, uuid.UUID) {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app1 := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app1 := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, jobapplication.StateWaiting)
 				return app1.ID, uuid.Nil, job.ID // No other app needed here
 			},
 			req: &dto.AcceptApplicationRequest{
@@ -225,17 +226,17 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 				UserID: otherUser.ID, // Wrong user
 			},
 			// Expect no changes
-			expectedJobState:     models.JobStateWaiting, // Remains waiting
+			expectedJobState:     job.StateWaiting, // Remains waiting
 			expectedContractorID: nil,
-			expectedApp1State:    models.JobApplicationWaiting, // Should remain waiting
-			expectedApp2State:    models.JobApplicationWaiting, // Not applicable here, but default check
+			expectedApp1State:    jobapplication.StateWaiting, // Should remain waiting
+			expectedApp2State:    jobapplication.StateWaiting, // Not applicable here, but default check
 			expectedErr:          services.ErrForbidden,
 		},
 		{
 			name: "Error_JobNotWaiting",
 			setupFunc: func() (uuid.UUID, uuid.UUID, uuid.UUID) {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateOngoing, &contractor1.ID) // Job already taken
-				app := createTestApplication(t, ctx, pool, job.ID, contractor2.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateOngoing, &contractor1.ID) // Job already taken
+				app := createTestApplication(t, ctx, pool, job.ID, contractor2.ID, jobapplication.StateWaiting)
 				return app.ID, uuid.Nil, job.ID
 			},
 			req: &dto.AcceptApplicationRequest{
@@ -248,8 +249,8 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 		{
 			name: "Error_ApplicationNotWaiting",
 			setupFunc: func() (uuid.UUID, uuid.UUID, uuid.UUID) {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, models.JobApplicationAccepted) // App already accepted
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor1.ID, jobapplication.StateAccepted) // App already accepted
 				return app.ID, uuid.Nil, job.ID
 			},
 			req: &dto.AcceptApplicationRequest{
@@ -278,10 +279,10 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var targetAppID, otherAppID, targetJobID uuid.UUID
 			// Get initial state defaults for verification on failure
-			initialJobState := models.JobStateWaiting
+			initialJobState := job.StateWaiting
 			initialContractorID := (*uuid.UUID)(nil)
-			initialApp1State := models.JobApplicationWaiting
-			initialApp2State := models.JobApplicationWaiting
+			initialApp1State := jobapplication.StateWaiting
+			initialApp2State := jobapplication.StateWaiting
 
 			if tt.setupFunc != nil {
 				targetAppID, otherAppID, targetJobID = tt.setupFunc()
@@ -292,7 +293,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 					initialJob, err := jobRepo.GetByID(ctx, &dto.GetJobByIDRequest{ID: targetJobID})
 					if err == nil {
 						initialJobState = initialJob.State
-						initialContractorID = initialJob.ContractorID
+						initialContractorID = &initialJob.ContractorID
 					}
 				}
 				if targetAppID != uuid.Nil {
@@ -390,47 +391,47 @@ func TestJobApplicationService_Integration_RejectApplication(t *testing.T) {
 		name          string
 		setupFunc     func() uuid.UUID // Returns ApplicationID
 		req           *dto.RejectApplicationRequest
-		expectedState models.JobApplicationState
+		expectedState jobapplication.State
 		expectedErr   error
 		errorContains string
 	}{
 		{
 			name: "Success",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateWaiting)
 				return app.ID
 			},
 			req: &dto.RejectApplicationRequest{
 				UserID: employer.ID, // Correct employer
 			},
-			expectedState: models.JobApplicationRejected,
+			expectedState: jobapplication.StateRejected,
 			expectedErr:   nil,
 		},
 		{
 			name: "Error_Forbidden_NotEmployer",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateWaiting)
 				return app.ID
 			},
 			req: &dto.RejectApplicationRequest{
 				UserID: otherUser.ID, // Wrong user
 			},
-			expectedState: models.JobApplicationWaiting, // Should not change
+			expectedState: jobapplication.StateWaiting, // Should not change
 			expectedErr:   services.ErrForbidden,
 		},
 		{
 			name: "Error_ApplicationNotWaiting",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationAccepted) // Already accepted
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateAccepted) // Already accepted
 				return app.ID
 			},
 			req: &dto.RejectApplicationRequest{
 				UserID: employer.ID,
 			},
-			expectedState: models.JobApplicationAccepted, // Should not change
+			expectedState: jobapplication.StateAccepted, // Should not change
 			expectedErr:   services.ErrInvalidState,
 			errorContains: "application is not in 'Waiting' state",
 		},
@@ -496,47 +497,47 @@ func TestJobApplicationService_Integration_WithdrawApplication(t *testing.T) {
 		name          string
 		setupFunc     func() uuid.UUID // Returns ApplicationID
 		req           *dto.WithdrawApplicationRequest
-		expectedState models.JobApplicationState
+		expectedState jobapplication.State
 		expectedErr   error
 		errorContains string
 	}{
 		{
 			name: "Success",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateWaiting)
 				return app.ID
 			},
 			req: &dto.WithdrawApplicationRequest{
 				UserID: contractor.ID, // Correct applicant
 			},
-			expectedState: models.JobApplicationWithdrawn,
+			expectedState: jobapplication.StateWithdrawn,
 			expectedErr:   nil,
 		},
 		{
 			name: "Error_Forbidden_NotApplicant",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationWaiting)
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateWaiting)
 				return app.ID
 			},
 			req: &dto.WithdrawApplicationRequest{
 				UserID: otherUser.ID, // Wrong user
 			},
-			expectedState: models.JobApplicationWaiting, // Should not change
+			expectedState: jobapplication.StateWaiting, // Should not change
 			expectedErr:   services.ErrForbidden,
 		},
 		{
 			name: "Error_ApplicationNotWaiting",
 			setupFunc: func() uuid.UUID {
-				job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationRejected) // Already rejected
+				job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+				app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateRejected) // Already rejected
 				return app.ID
 			},
 			req: &dto.WithdrawApplicationRequest{
 				UserID: contractor.ID,
 			},
-			expectedState: models.JobApplicationRejected, // Should not change
+			expectedState: jobapplication.StateRejected, // Should not change
 			expectedErr:   services.ErrInvalidState,
 			errorContains: "application is not in 'Waiting' state",
 		},
@@ -596,8 +597,8 @@ func TestJobApplicationService_Integration_GetApplicationByID(t *testing.T) {
 	employer := createTestUser(t, ctx, pool, "getapp-employer@test.com", "GetApp Employer")
 	contractor := createTestUser(t, ctx, pool, "getapp-contractor@test.com", "GetApp Contractor")
 	otherUser := createTestUser(t, ctx, pool, "getapp-other@test.com", "GetApp Other")
-	job := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-	app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, models.JobApplicationWaiting)
+	job := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+	app := createTestApplication(t, ctx, pool, job.ID, contractor.ID, jobapplication.StateWaiting)
 
 	tests := []struct {
 		name        string
@@ -605,23 +606,23 @@ func TestJobApplicationService_Integration_GetApplicationByID(t *testing.T) {
 		expectedErr error
 	}{
 		{
-			name: "Success_AsApplicant",
-			req:  &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: contractor.ID},
+			name:        "Success_AsApplicant",
+			req:         &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: contractor.ID},
 			expectedErr: nil,
 		},
 		{
-			name: "Success_AsEmployer",
-			req:  &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: employer.ID},
+			name:        "Success_AsEmployer",
+			req:         &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: employer.ID},
 			expectedErr: nil,
 		},
 		{
-			name: "Error_Forbidden",
-			req:  &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: otherUser.ID},
+			name:        "Error_Forbidden",
+			req:         &dto.GetJobApplicationByIDRequest{ID: app.ID, UserID: otherUser.ID},
 			expectedErr: services.ErrForbidden,
 		},
 		{
-			name: "Error_NotFound",
-			req:  &dto.GetJobApplicationByIDRequest{ID: uuid.New(), UserID: contractor.ID},
+			name:        "Error_NotFound",
+			req:         &dto.GetJobApplicationByIDRequest{ID: uuid.New(), UserID: contractor.ID},
 			expectedErr: services.ErrNotFound,
 		},
 	}
@@ -654,14 +655,14 @@ func TestJobApplicationService_Integration_ListApplicationsByContractor(t *testi
 	contractor1 := createTestUser(t, ctx, pool, "listcon-con1@test.com", "ListCon Con1")
 	contractor2 := createTestUser(t, ctx, pool, "listcon-con2@test.com", "ListCon Con2")
 
-	job1 := createTestJob(t, ctx, pool, employer1.ID, models.JobStateWaiting, nil)
-	job2 := createTestJob(t, ctx, pool, employer1.ID, models.JobStateWaiting, nil)
+	job1 := createTestJob(t, ctx, pool, employer1.ID, job.StateWaiting, nil)
+	job2 := createTestJob(t, ctx, pool, employer1.ID, job.StateWaiting, nil)
 
 	// Apps for contractor1
-	app1Con1 := createTestApplication(t, ctx, pool, job1.ID, contractor1.ID, models.JobApplicationWaiting)
-	app2Con1 := createTestApplication(t, ctx, pool, job2.ID, contractor1.ID, models.JobApplicationAccepted)
+	app1Con1 := createTestApplication(t, ctx, pool, job1.ID, contractor1.ID, jobapplication.StateWaiting)
+	app2Con1 := createTestApplication(t, ctx, pool, job2.ID, contractor1.ID, jobapplication.StateAccepted)
 	// App for contractor2
-	_ = createTestApplication(t, ctx, pool, job1.ID, contractor2.ID, models.JobApplicationWaiting)
+	_ = createTestApplication(t, ctx, pool, job1.ID, contractor2.ID, jobapplication.StateWaiting)
 
 	req := &dto.ListJobApplicationsByContractorRequest{
 		ContractorID: contractor1.ID,
@@ -681,11 +682,11 @@ func TestJobApplicationService_Integration_ListApplicationsByContractor(t *testi
 		assert.Equal(t, contractor1.ID, app.ContractorID)
 		if app.ID == app1Con1.ID {
 			foundApp1 = true
-			assert.Equal(t, models.JobApplicationWaiting, app.State)
+			assert.Equal(t, jobapplication.StateWaiting, app.State)
 		}
 		if app.ID == app2Con1.ID {
 			foundApp2 = true
-			assert.Equal(t, models.JobApplicationAccepted, app.State)
+			assert.Equal(t, jobapplication.StateAccepted, app.State)
 		}
 	}
 	assert.True(t, foundApp1, "Application 1 for contractor 1 not found")
@@ -702,14 +703,14 @@ func TestJobApplicationService_Integration_ListApplicationsByJob(t *testing.T) {
 	contractor2 := createTestUser(t, ctx, pool, "listjob-con2@test.com", "ListJob Con2")
 	otherUser := createTestUser(t, ctx, pool, "listjob-other@test.com", "ListJob Other")
 
-	job1 := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil)
-	job2 := createTestJob(t, ctx, pool, employer.ID, models.JobStateWaiting, nil) // Another job by same employer
+	job1 := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil)
+	job2 := createTestJob(t, ctx, pool, employer.ID, job.StateWaiting, nil) // Another job by same employer
 
 	// Apps for job1
-	app1Job1 := createTestApplication(t, ctx, pool, job1.ID, contractor1.ID, models.JobApplicationWaiting)
-	app2Job1 := createTestApplication(t, ctx, pool, job1.ID, contractor2.ID, models.JobApplicationRejected)
+	app1Job1 := createTestApplication(t, ctx, pool, job1.ID, contractor1.ID, jobapplication.StateWaiting)
+	app2Job1 := createTestApplication(t, ctx, pool, job1.ID, contractor2.ID, jobapplication.StateRejected)
 	// App for job2
-	_ = createTestApplication(t, ctx, pool, job2.ID, contractor1.ID, models.JobApplicationWaiting)
+	_ = createTestApplication(t, ctx, pool, job2.ID, contractor1.ID, jobapplication.StateWaiting)
 
 	tests := []struct {
 		name          string
@@ -769,8 +770,12 @@ func TestJobApplicationService_Integration_ListApplicationsByJob(t *testing.T) {
 					foundApp1 := false
 					foundApp2 := false
 					for _, app := range apps {
-						if app.ID == app1Job1.ID { foundApp1 = true }
-						if app.ID == app2Job1.ID { foundApp2 = true }
+						if app.ID == app1Job1.ID {
+							foundApp1 = true
+						}
+						if app.ID == app2Job1.ID {
+							foundApp2 = true
+						}
 					}
 					assert.True(t, foundApp1, "App1 for job1 not found")
 					assert.True(t, foundApp2, "App2 for job1 not found")

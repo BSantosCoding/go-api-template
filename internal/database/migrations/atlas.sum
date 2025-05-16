@@ -1,0 +1,8 @@
+h1:C/4cXTBLJjZOIrweV6VXn5E2nF2ROC/lmpR9orUc3VM=
+000001_create_users_table.up.sql h1:Tf0klyiVQ7G33upftHO0qxz5OVvj8W357vgAPKvByuw=
+000002_create_items_table.up.sql h1:awjqBP2LnXM7qDCMGKZgyDjDFWHOlkMRrdSg/WX8Tmc=
+000003_add_auth_to_user.up.sql h1:EliXpVWoJh2uHB8voE/ci7QvtZcp7Mbh5paSvWPW8hE=
+000004_drop_items_table.up.sql h1:FjxwelYgADStnA7Ryd91PMEE2flvUkm5xUZfSKzJ4IA=
+000005_create_jobs_table.up.sql h1:JQGtoWav+TIItKLi1ESM5R6Zh6zwsGY7dWtT8km1E6k=
+000006_create_invoices_table.up.sql h1:VhICuzucrpXy/CcUcfDQ2/1ansgNEbWN2MxcrcngLLg=
+000007_add_job_application.up.sql h1:gCqvSJqZtLQC6AaZVvrKcMm/s82oYScX78JHnfiU9jk=

@@ -3,8 +3,8 @@ package integration_tests
 import (
 	"context"
 	"errors"
-	"fmt"
-	"go-api-template/internal/models"
+	"go-api-template/ent"
+	"go-api-template/ent/job"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
 	"log"
@@ -17,7 +17,6 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Driver for postgres
 	_ "github.com/golang-migrate/migrate/v4/source/file"       // Driver for file source
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +28,7 @@ func ptrFloat64(f float64) *float64 { return &f }
 func ptrInt(i int) *int { return &i }
 
 // Helper function to create a user for tests
-func createTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email, name string) *models.User {
+func createTestUser(t *testing.T, ctx context.Context, pool *ent.Client, email, name string) *ent.User {
 	t.Helper()
 	userRepo := postgres.NewUserRepo(pool)
 	userReq := &dto.CreateUserRequest{
@@ -43,8 +42,8 @@ func createTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email
 	return user
 }
 
-// Helper function to create a job for tests 
-func createTestJob(t *testing.T, ctx context.Context, pool *pgxpool.Pool, employerID uuid.UUID, state models.JobState, contractorID *uuid.UUID) *models.Job {
+// Helper function to create a job for tests
+func createTestJob(t *testing.T, ctx context.Context, pool *ent.Client, employerID uuid.UUID, state job.State, contractorID *uuid.UUID) *ent.Job {
 	t.Helper()
 	jobRepo := postgres.NewJobRepo(pool)
 	jobReq := &dto.CreateJobRequest{
@@ -53,14 +52,14 @@ func createTestJob(t *testing.T, ctx context.Context, pool *pgxpool.Pool, employ
 		InvoiceInterval: 10,
 		EmployerID:      employerID,
 	}
-	job, err := jobRepo.Create(ctx, jobReq)
+	resultingJob, err := jobRepo.Create(ctx, jobReq)
 	require.NoError(t, err, "Failed to create test job for employer %s", employerID)
-	require.NotNil(t, job)
+	require.NotNil(t, resultingJob)
 
 	// Update state/contractor if needed for the test scenario
-	if state != models.JobStateWaiting || contractorID != nil {
-		updateReq := dto.UpdateJobRequest{ID: job.ID}
-		if state != models.JobStateWaiting {
+	if state != job.StateWaiting || contractorID != nil {
+		updateReq := dto.UpdateJobRequest{ID: resultingJob.ID}
+		if state != job.StateWaiting {
 			updateReq.State = &state
 		}
 		if contractorID != nil {
@@ -70,28 +69,17 @@ func createTestJob(t *testing.T, ctx context.Context, pool *pgxpool.Pool, employ
 		require.NoError(t, updateErr, "Failed to update test job state/contractor")
 		return updatedJob
 	}
-	return job
+	return resultingJob
 }
 
-var testDBPool *pgxpool.Pool
+var testDB *ent.Client
 var testRedisClient *redis.Client
 
 // getTestClients establishes a connection pool to the test database.
 // It reads the DSN from the TEST_DATABASE_URL environment variable.
-func getTestClients(t *testing.T) (*pgxpool.Pool, *redis.Client) {
+func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 	// Use t.Helper() to mark this as a test helper function
 	t.Helper()
-
-	if testDBPool != nil {
-		// Ping existing pool to ensure it's still valid
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := testDBPool.Ping(ctx); err != nil {
-			log.Println("Existing test DB pool connection is invalid, creating a new one.")
-			testDBPool.Close() // Close the invalid pool
-			testDBPool = nil
-		}
-	}
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -101,23 +89,12 @@ func getTestClients(t *testing.T) (*pgxpool.Pool, *redis.Client) {
 	// Run migrations before creating the pool to ensure schema exists
 	runMigrations(t, dsn)
 
-	config, err := pgxpool.ParseConfig(dsn)
-	require.NoError(t, err, "Failed to parse test database DSN")
+	client, err := ent.Open("pgx", dsn)
+	if err != nil {
+		return nil, nil
+	}
 
-	// Optional: Configure pool settings (e.g., max connections)
-	// config.MaxConns = 5
-
-	pool, err := pgxpool.NewWithConfig(context.Background(), config)
-	require.NoError(t, err, "Failed to connect to test database")
-
-	// Ping the database to ensure connectivity
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = pool.Ping(ctx)
-	require.NoError(t, err, "Failed to ping test database")
-
-	log.Println("Successfully connected to test database.")
-	testDBPool = pool // Store the pool globally for reuse within the test run
+	testDB = client
 
 	// --- Redis Setup ---
 	if testRedisClient == nil {
@@ -137,8 +114,8 @@ func getTestClients(t *testing.T) (*pgxpool.Pool, *redis.Client) {
 				testRedisClient = rdb
 			}
 		}
-	} 
-	return testDBPool, testRedisClient
+	}
+	return testDB, testRedisClient
 }
 
 // runMigrations runs database migrations up.
@@ -166,17 +143,29 @@ func runMigrations(t *testing.T, dsn string) {
 }
 
 // cleanupTables truncates specified tables for test isolation.
-func cleanupTables(t *testing.T, pool *pgxpool.Pool, tables ...string) {
+func cleanupTables(t *testing.T, pool *ent.Client, tables ...string) {
 	t.Helper()
 	if len(tables) == 0 {
 		return // Nothing to clean
 	}
-	// Use TRUNCATE ... RESTART IDENTITY CASCADE for thorough cleanup
-	// Ensure table names are properly quoted if they contain special characters or are case-sensitive
-	// For simplicity, assuming standard table names here.
-	query := fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE", strings.Join(tables, ", "))
-	_, err := pool.Exec(context.Background(), query)
-	require.NoError(t, err, "Failed to truncate tables: %s", strings.Join(tables, ", "))
+
+	for _, table := range tables {
+		switch table {
+		case "users":
+			_, err := pool.User.Delete().Exec(context.Background())
+			require.NoError(t, err, "Failed to truncate users table")
+		case "jobs":
+			_, err := pool.Job.Delete().Exec(context.Background())
+			require.NoError(t, err, "Failed to truncate jobs table")
+		case "invoices":
+			_, err := pool.Invoice.Delete().Exec(context.Background())
+			require.NoError(t, err, "Failed to truncate invoices table")
+		case "job_application":
+			_, err := pool.JobApplication.Delete().Exec(context.Background())
+			require.NoError(t, err, "Failed to truncate job_applications table")
+		default:
+		}
+	}
 	log.Printf("Cleaned tables: %s", strings.Join(tables, ", "))
 }
 

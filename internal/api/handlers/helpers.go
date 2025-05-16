@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"go-api-template/internal/models"
+	"go-api-template/ent"
 	"go-api-template/internal/transport/dto"
 	"time"
 
@@ -35,8 +35,8 @@ func FormatValidationErrors(err error) map[string]string {
 	return errorsMap
 }
 
-// MapUserModelToUserResponse converts a models.User to a dto.UserResponse
-func MapUserModelToUserResponse(user *models.User) dto.UserResponse {
+// MapUserModelToUserResponse converts a ent.User to a dto.UserResponse
+func MapUserModelToUserResponse(user *ent.User) dto.UserResponse {
 	return dto.UserResponse{
 		ID:        user.ID,
 		Name:      user.Name,
@@ -46,14 +46,14 @@ func MapUserModelToUserResponse(user *models.User) dto.UserResponse {
 	}
 }
 
-// MapJobModelToJobResponse converts a models.Job to a dto.JobResponse
-func MapJobModelToJobResponse(job *models.Job) dto.JobResponse {
+// MapJobModelToJobResponse converts a ent.Job to a dto.JobResponse
+func MapJobModelToJobResponse(job *ent.Job) dto.JobResponse {
 	// ... (implementation from previous step) ...
 	resp := dto.JobResponse{
 		ID:              job.ID,
 		Rate:            job.Rate,
 		Duration:        job.Duration,
-		ContractorID:    job.ContractorID,
+		ContractorID:    &job.ContractorID,
 		EmployerID:      job.EmployerID,
 		State:           string(job.State), // Convert enum to string
 		InvoiceInterval: job.InvoiceInterval,
@@ -63,8 +63,8 @@ func MapJobModelToJobResponse(job *models.Job) dto.JobResponse {
 	return resp
 }
 
-// MapInvoiceModelToInvoiceResponse converts a models.Invoice to a dto.InvoiceResponse
-func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceResponse {
+// MapInvoiceModelToInvoiceResponse converts a ent.Invoice to a dto.InvoiceResponse
+func MapInvoiceModelToInvoiceResponse(invoice *ent.Invoice) dto.InvoiceResponse {
 	return dto.InvoiceResponse{
 		ID:             invoice.ID,
 		Value:          invoice.Value,
@@ -76,13 +76,13 @@ func MapInvoiceModelToInvoiceResponse(invoice *models.Invoice) dto.InvoiceRespon
 	}
 }
 
-// MapJobApplicationModelToResponse converts a models.JobApplication to a dto.JobApplicationResponse
-func MapJobApplicationModelToResponse(app *models.JobApplication) dto.JobApplicationResponse {
+// MapJobApplicationModelToResponse converts a ent.JobApplication to a dto.JobApplicationResponse
+func MapJobApplicationModelToResponse(app *ent.JobApplication) dto.JobApplicationResponse {
 	return dto.JobApplicationResponse{
 		ID:           app.ID,
 		ContractorID: app.ContractorID,
 		JobID:        app.JobID,
-		State:        app.State, // Assuming JobApplicationState is already a string or has a String() method
+		State:        app.State,                          // Assuming JobApplicationState is already a string or has a String() method
 		CreatedAt:    app.CreatedAt.Format(time.RFC3339), // Format time for consistency
 		UpdatedAt:    app.UpdatedAt.Format(time.RFC3339), // Format time for consistency
 	}
