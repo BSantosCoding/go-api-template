@@ -7,6 +7,7 @@ import (
 	"go-api-template/ent/job"
 	"go-api-template/internal/storage/postgres"
 	"go-api-template/internal/transport/dto"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -81,6 +82,7 @@ var testRedisClient *redis.Client
 func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 	// Use t.Helper() to mark this as a test helper function
 	t.Helper()
+	log.SetOutput(io.Discard) // Disable logging during tests
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
