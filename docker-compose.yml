@@ -31,6 +31,17 @@ services:
     restart: unless-stopped
     networks: # Add db to the network
       - app-network
+  db-atlas:
+    image: postgres:15-alpine
+    container_name: go_api_db_atlas
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_ATLAS_NAME:-atlas_dev}
+    ports:
+      - '${DB_ATLAS_PORT:-5432}:5432'
+    networks: # Add db to the network
+      - app-network
 
   # Go API Service
   api:

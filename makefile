@@ -23,7 +23,7 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 	install-atlas install-swag install-air \
 	check-swag check-air check-db-url check-test-db-url \
 	docker-build docker-build-nocache docker-up docker-down docker-stop docker-logs docker-logs-api docker-logs-db docker-exec-api \
-	 docker-db-reset \
+	docker-db-reset \
 	mocks clean-mocks
 
 # Default target when running 'make'
@@ -59,7 +59,7 @@ atlas-diff:
 	@atlas migrate diff automatic_migration \
 	--dir "file://ent/migrate/migrations" \
 	--to "ent://ent/schema" \
-	--dev-url "$(TEST_DATABASE_URL)&search_path=public" 
+	--dev-url "$(ATLAS_DATABASE_URL)&search_path=public" 
 
 atlas-apply:
 	@atlas migrate apply \
