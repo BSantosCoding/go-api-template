@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"github.com/google/uuid"
@@ -46,17 +47,17 @@ func (Job) Edges() []ent.Edge {
 			Required().
 			Unique().
 			Immutable().
-			Field("employer_id"), // Maps to the foreign key column
+			Field("employer_id"),
 
 		// Job may have a contractor (User). Optional edge.
 		edge.From("contractor", User.Type).
 			Ref("jobsAsContractor").
 			Unique().
-			Field("contractor_id"), // Maps to the foreign key column
+			Field("contractor_id"),
 
 		// Job has multiple invoices.
-		edge.To("invoices", Invoice.Type), // Corrected line
+		edge.To("invoices", Invoice.Type).Annotations(entsql.OnDelete(entsql.Cascade)), // Corrected line
 		// Job has multiple applications.
-		edge.To("applications", JobApplication.Type), // Corrected line
+		edge.To("applications", JobApplication.Type).Annotations(entsql.OnDelete(entsql.Cascade)), // Corrected line
 	}
 }

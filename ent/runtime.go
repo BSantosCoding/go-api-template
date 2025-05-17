@@ -23,6 +23,10 @@ func init() {
 	invoiceDescValue := invoiceFields[1].Descriptor()
 	// invoice.ValueValidator is a validator for the "value" field. It is called by the builders before save.
 	invoice.ValueValidator = invoiceDescValue.Validators[0].(func(float64) error)
+	// invoiceDescIntervalNumber is the schema descriptor for interval_number field.
+	invoiceDescIntervalNumber := invoiceFields[4].Descriptor()
+	// invoice.DefaultIntervalNumber holds the default value on creation for the interval_number field.
+	invoice.DefaultIntervalNumber = invoiceDescIntervalNumber.Default.(int)
 	// invoiceDescCreatedAt is the schema descriptor for created_at field.
 	invoiceDescCreatedAt := invoiceFields[5].Descriptor()
 	// invoice.DefaultCreatedAt holds the default value on creation for the created_at field.

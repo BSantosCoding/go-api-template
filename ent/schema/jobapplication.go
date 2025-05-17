@@ -49,7 +49,7 @@ func (JobApplication) Edges() []ent.Edge {
 			Required().
 			Unique().
 			Immutable().
-			Field("contractor_id"), // Maps to the foreign key column
+			Field("contractor_id"),
 
 		// Application is for a specific Job. Required edge.
 		edge.From("job", Job.Type).
@@ -57,6 +57,6 @@ func (JobApplication) Edges() []ent.Edge {
 			Required().
 			Unique().
 			Immutable().
-			Field("job_id"), // Maps to the foreign key column
+			Field("job_id"),
 	}
 }

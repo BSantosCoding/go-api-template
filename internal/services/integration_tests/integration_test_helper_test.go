@@ -3,7 +3,6 @@ package integration_tests
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"go-api-template/ent"
 	"go-api-template/ent/job"
 	"go-api-template/internal/storage/postgres"
@@ -18,9 +17,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"entgo.io/ent/dialect"
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Driver for postgres
-	_ "github.com/golang-migrate/migrate/v4/source/file"       // Driver for file source
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -91,9 +87,6 @@ func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 		t.Fatal("TEST_DATABASE_URL environment variable not set")
 	}
 
-	// Run migrations before creating the pool to ensure schema exists
-	runMigrations(t, dsn)
-
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, nil
@@ -103,6 +96,9 @@ func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 	entClient := ent.NewClient(ent.Driver(entDriver))
 
 	testDB = entClient
+
+	// Run migrations before creating the pool to ensure schema exists
+	runMigrations(t)
 
 	// --- Redis Setup ---
 	if testRedisClient == nil {
@@ -127,27 +123,14 @@ func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 }
 
 // runMigrations runs database migrations up.
-func runMigrations(t *testing.T, dsn string) {
+func runMigrations(t *testing.T) {
 	t.Helper()
-	migrationsPath := "file://../../database/migrations"
 
-	m, err := migrate.New(migrationsPath, dsn)
-	// Handle potential "file does not exist" error more gracefully if path is wrong
-	if err != nil {
-		// Check if it's a path error
-		if os.IsNotExist(err) {
-			t.Fatalf("Migrations path error: %v. Check if path '%s' is correct relative to the test execution directory.", err, migrationsPath)
-		}
-		require.NoError(t, err, "Failed to create migrate instance")
-	}
+	ctx := context.Background()
 
-	err = m.Up()
-	// migrate.ErrNoChange is not an actual error, just indicates no migrations were run
-	if err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		// If there's a different error (like dirty database), fail the test
-		require.NoError(t, err, "Failed to run migrations up")
-	}
-	log.Println("Migrations applied successfully (or no change).")
+	err := testDB.Schema.Create(ctx)
+	require.NoError(t, err)
+	log.Println("Ent client connected and schema created/checked.")
 }
 
 // cleanupTables truncates specified tables for test isolation.

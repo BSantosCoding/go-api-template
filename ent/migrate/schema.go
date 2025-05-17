@@ -14,7 +14,7 @@ var (
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "value", Type: field.TypeFloat64},
 		{Name: "state", Type: field.TypeEnum, Enums: []string{"Waiting", "Complete"}, Default: "Waiting"},
-		{Name: "interval_number", Type: field.TypeInt},
+		{Name: "interval_number", Type: field.TypeInt, Default: 1},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "job_id", Type: field.TypeUUID},
@@ -29,7 +29,7 @@ var (
 				Symbol:     "invoices_jobs_invoices",
 				Columns:    []*schema.Column{InvoicesColumns[6]},
 				RefColumns: []*schema.Column{JobsColumns[0]},
-				OnDelete:   schema.NoAction,
+				OnDelete:   schema.Cascade,
 			},
 		},
 	}
@@ -55,7 +55,7 @@ var (
 				Symbol:     "jobs_users_jobsAsEmployer",
 				Columns:    []*schema.Column{JobsColumns[7]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
-				OnDelete:   schema.NoAction,
+				OnDelete:   schema.Cascade,
 			},
 			{
 				Symbol:     "jobs_users_jobsAsContractor",
@@ -84,13 +84,13 @@ var (
 				Symbol:     "job_application_jobs_applications",
 				Columns:    []*schema.Column{JobApplicationColumns[4]},
 				RefColumns: []*schema.Column{JobsColumns[0]},
-				OnDelete:   schema.NoAction,
+				OnDelete:   schema.Cascade,
 			},
 			{
 				Symbol:     "job_application_users_applicationsAsContractor",
 				Columns:    []*schema.Column{JobApplicationColumns[5]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
-				OnDelete:   schema.NoAction,
+				OnDelete:   schema.Cascade,
 			},
 		},
 	}

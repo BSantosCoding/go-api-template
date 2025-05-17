@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"github.com/google/uuid"
@@ -41,12 +42,12 @@ func (User) Fields() []ent.Field {
 func (User) Edges() []ent.Edge {
 	return []ent.Edge{
 		// User can be an employer for multiple jobs.
-		edge.To("jobsAsEmployer", Job.Type),
+		edge.To("jobsAsEmployer", Job.Type).Annotations(entsql.OnDelete(entsql.Cascade)),
 
 		// User can be a contractor for multiple jobs (optional).
 		edge.To("jobsAsContractor", Job.Type),
 
 		// User can submit multiple job applications.
-		edge.To("applicationsAsContractor", JobApplication.Type),
+		edge.To("applicationsAsContractor", JobApplication.Type).Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }

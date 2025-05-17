@@ -65,6 +65,8 @@ func ValidColumn(column string) bool {
 var (
 	// ValueValidator is a validator for the "value" field. It is called by the builders before save.
 	ValueValidator func(float64) error
+	// DefaultIntervalNumber holds the default value on creation for the "interval_number" field.
+	DefaultIntervalNumber int
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.

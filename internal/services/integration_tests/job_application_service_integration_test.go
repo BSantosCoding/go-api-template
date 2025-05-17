@@ -117,7 +117,7 @@ func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 				ContractorID: contractor.ID, // Same as first success case
 			},
 			expectedErr:   services.ErrConflict,
-			errorContains: "duplicate",
+			errorContains: "already applied",
 		},
 	}
 

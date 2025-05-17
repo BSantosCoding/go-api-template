@@ -49,6 +49,7 @@ type JobApplicationRepository interface {
 	GetByID(ctx context.Context, req *dto.GetJobApplicationByIDRequest) (*ent.JobApplication, error)
 	ListByContractor(ctx context.Context, req *dto.ListJobApplicationsByContractorRequest) ([]*ent.JobApplication, error)
 	ListByJob(ctx context.Context, req *dto.ListJobApplicationsByJobRequest) ([]*ent.JobApplication, error)
+	GetByJobAndContractor(ctx context.Context, req *dto.GetByJobAndContractorRequest) ([]*ent.JobApplication, error)
 	UpdateState(ctx context.Context, req *dto.UpdateJobApplicationStateRequest) (*ent.JobApplication, error)
 	UpdateStateByJobID(ctx context.Context, jobID uuid.UUID, newState jobapplication.State, excludeApplicationID *uuid.UUID) error
 	Delete(ctx context.Context, req *dto.DeleteJobApplicationRequest) error

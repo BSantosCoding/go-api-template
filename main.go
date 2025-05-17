@@ -62,12 +62,6 @@ func main() {
 	}
 	defer entClient.Close()
 
-	ctx := context.Background()
-	if err := entClient.Schema.Create(ctx); err != nil {
-		log.Fatalf("failed creating schema resources: %v", err)
-	}
-	log.Println("Ent client connected and schema created/checked.")
-
 	// --- Initialize Blockchain Event Listener ---
 	var eventListener *blockchain.EventListener
 	if cfg.Blockchain.RPCURL != "" && cfg.Blockchain.ContractAddress != "" && cfg.Blockchain.ContractABIPath != "" {

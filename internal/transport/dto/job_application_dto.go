@@ -70,3 +70,9 @@ type WithdrawApplicationRequest struct {
 	ApplicationID uuid.UUID `json:"-" validate:"required"` // From path
 	UserID        uuid.UUID `json:"-"`                     // Set from user context (must be applicant)
 }
+
+// GetByJobAndContractorRequest defines parameters for listing applications by job and contractor.
+type GetByJobAndContractorRequest struct {
+	JobID  uuid.UUID `json:"-" validate:"required"`
+	UserID uuid.UUID `json:"-" validate:"required"` // Set from user context for auth check
+}

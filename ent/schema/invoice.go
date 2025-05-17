@@ -44,6 +44,6 @@ func (Invoice) Edges() []ent.Edge {
 			Required().
 			Unique().
 			Immutable().
-			Field("job_id"), // Maps to the foreign key column
+			Field("job_id"),
 	}
 }

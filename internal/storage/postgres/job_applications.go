@@ -97,6 +97,20 @@ func (r *JobApplicationRepo) ListByJob(ctx context.Context, req *dto.ListJobAppl
 	return apps, nil
 }
 
+func (r *JobApplicationRepo) GetByJobAndContractor(ctx context.Context, req *dto.GetByJobAndContractorRequest) ([]*ent.JobApplication, error) {
+	apps, err := r.client.JobApplication.Query().
+		Where(jobapplication.JobID(req.JobID), jobapplication.ContractorID(req.UserID)).
+		Order(ent.Desc(jobapplication.FieldCreatedAt)).
+		All(ctx)
+
+	if err != nil {
+		log.Printf("Error querying job applications by job ID %s: %v\n", req.JobID, err)
+		return nil, fmt.Errorf("failed to list job applications by job: %w", err)
+	}
+
+	return apps, nil
+}
+
 func (r *JobApplicationRepo) UpdateState(ctx context.Context, req *dto.UpdateJobApplicationStateRequest) (*ent.JobApplication, error) {
 	updatedApp, err := r.client.JobApplication.UpdateOneID(req.ID).
 		SetState(jobapplication.State(req.State)).
@@ -132,9 +146,6 @@ func (r *JobApplicationRepo) UpdateStateByJobID(ctx context.Context, jobID uuid.
 		return fmt.Errorf("failed to update job application states for job %s: %w", jobID, err)
 	}
 
-	// Ent's Exec doesn't easily return the number of rows affected for Update queries in this pattern.
-	// If the row count is critical, you might need a separate Count query before the update,
-	// or refactor the update logic. For now, we omit the log line with rows affected.
 	log.Printf("Updated job applications for job %s to state %s", jobID, newState)
 	return nil
 }

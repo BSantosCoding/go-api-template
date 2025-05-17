@@ -47,7 +47,15 @@ func (s *jobApplicationService) ApplyToJob(ctx context.Context, req *dto.ApplyTo
 	if jobFound.EmployerID == req.ContractorID {
 		return nil, fmt.Errorf("%w: employer cannot apply to their own job", ErrForbidden)
 	}
-	// TODO: Add check if user is actually a contractor (if roles exist)
+
+	existingApplications, err := s.appRepo.GetByJobAndContractor(ctx, &dto.GetByJobAndContractorRequest{UserID: req.ContractorID, JobID: req.JobID})
+	if err != nil {
+		return nil, mapRepoError(err, fmt.Sprintf("fetching job %s for application", req.JobID))
+	}
+	if len(existingApplications) > 0 {
+		log.Printf("ApplyToJob: Attempt to apply to job %s for contractor %s, but already applied", req.JobID, req.ContractorID)
+		return nil, fmt.Errorf("%w: already applied to job", ErrConflict)
+	}
 
 	// 3. Create the application using the repository
 	createReq := dto.CreateJobApplicationRequest{

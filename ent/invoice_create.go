@@ -54,6 +54,14 @@ func (ic *InvoiceCreate) SetIntervalNumber(i int) *InvoiceCreate {
 	return ic
 }
 
+// SetNillableIntervalNumber sets the "interval_number" field if the given value is not nil.
+func (ic *InvoiceCreate) SetNillableIntervalNumber(i *int) *InvoiceCreate {
+	if i != nil {
+		ic.SetIntervalNumber(*i)
+	}
+	return ic
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (ic *InvoiceCreate) SetCreatedAt(t time.Time) *InvoiceCreate {
 	ic.mutation.SetCreatedAt(t)
@@ -139,6 +147,10 @@ func (ic *InvoiceCreate) defaults() {
 	if _, ok := ic.mutation.State(); !ok {
 		v := invoice.DefaultState
 		ic.mutation.SetState(v)
+	}
+	if _, ok := ic.mutation.IntervalNumber(); !ok {
+		v := invoice.DefaultIntervalNumber
+		ic.mutation.SetIntervalNumber(v)
 	}
 	if _, ok := ic.mutation.CreatedAt(); !ok {
 		v := invoice.DefaultCreatedAt()

@@ -1,0 +1,10 @@
+-- Create "users" table
+CREATE TABLE "users" ("id" uuid NOT NULL, "name" character varying NOT NULL, "email" character varying NOT NULL, "password_hash" text NOT NULL, "created_at" timestamptz NOT NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"));
+-- Create index "users_email_key" to table: "users"
+CREATE UNIQUE INDEX "users_email_key" ON "users" ("email");
+-- Create "jobs" table
+CREATE TABLE "jobs" ("id" uuid NOT NULL, "rate" double precision NOT NULL, "duration" bigint NOT NULL, "state" character varying NOT NULL DEFAULT 'Waiting', "invoice_interval" bigint NOT NULL, "created_at" timestamptz NOT NULL, "updated_at" timestamptz NOT NULL, "employer_id" uuid NOT NULL, "contractor_id" uuid NULL, PRIMARY KEY ("id"), CONSTRAINT "jobs_users_jobsAsContractor" FOREIGN KEY ("contractor_id") REFERENCES "users" ("id") ON UPDATE NO ACTION ON DELETE SET NULL, CONSTRAINT "jobs_users_jobsAsEmployer" FOREIGN KEY ("employer_id") REFERENCES "users" ("id") ON UPDATE NO ACTION ON DELETE CASCADE);
+-- Create "invoices" table
+CREATE TABLE "invoices" ("id" uuid NOT NULL, "value" double precision NOT NULL, "state" character varying NOT NULL DEFAULT 'Waiting', "interval_number" bigint NOT NULL DEFAULT 1, "created_at" timestamptz NOT NULL, "updated_at" timestamptz NOT NULL, "job_id" uuid NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "invoices_jobs_invoices" FOREIGN KEY ("job_id") REFERENCES "jobs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE);
+-- Create "job_application" table
+CREATE TABLE "job_application" ("id" uuid NOT NULL, "state" character varying NOT NULL DEFAULT 'Waiting', "created_at" timestamptz NOT NULL, "updated_at" timestamptz NOT NULL, "job_id" uuid NOT NULL, "contractor_id" uuid NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "job_application_jobs_applications" FOREIGN KEY ("job_id") REFERENCES "jobs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE, CONSTRAINT "job_application_users_applicationsAsContractor" FOREIGN KEY ("contractor_id") REFERENCES "users" ("id") ON UPDATE NO ACTION ON DELETE CASCADE);

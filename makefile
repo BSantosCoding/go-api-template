@@ -18,12 +18,12 @@ AIR_CMD := $(shell command -v air 2> /dev/null)
 
 # Phony targets (targets that don't represent files)
 .PHONY: help \
-	migrate-create migrate-up migrate-down migrate-down-all migrate-force migrate-status migrate-test-up \
 	swagger-gen dev test \
-	install-migrate install-swag install-air \
-	check-migrate check-swag check-air check-db-url check-test-db-url \
+	atlas-diff atlas-apply atlas-status \
+	install-atlas install-swag install-air \
+	check-swag check-air check-db-url check-test-db-url \
 	docker-build docker-build-nocache docker-up docker-down docker-stop docker-logs docker-logs-api docker-logs-db docker-exec-api \
-	docker-migrate-up docker-migrate-down docker-migrate-status docker-migrate-force docker-db-reset \
+	 docker-db-reset \
 	mocks clean-mocks
 
 # Default target when running 'make'
@@ -52,63 +52,31 @@ test: ## Run all Service Integration tests
 	@-docker ps --filter name=test-redis --filter status=running -aq | xargs docker stop
 	@-docker ps --filter name=test-redis -aq | xargs docker container rm
 
-# --- Migration Commands ---
 
-migrate-create: check-migrate ## Create new SQL migration files. Usage: make migrate-create NAME=your_migration_name
-	@if [ -z "$(NAME)" ]; then \
-		echo "Error: NAME variable is not set."; \
-		echo "Usage: make migrate-create NAME=your_migration_name"; \
-		exit 1; \
-	fi
-	@echo "Creating migration files for '$(NAME)' in $(MIGRATIONS_DIR)..."
-	@$(MIGRATE_CMD) create -ext sql -dir $(MIGRATIONS_DIR) -seq "$(NAME)"
+# --- Atlas Commands ---
 
-migrate-up: check-migrate check-db-url ## Apply all pending 'up' migrations
-	@echo "Applying migrations from $(MIGRATIONS_DIR)..."
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) up
-	@echo "Migrations applied."
+atlas-diff: 
+	@atlas migrate diff automatic_migration \
+	--dir "file://ent/migrate/migrations" \
+	--to "ent://ent/schema" \
+	--dev-url "$(TEST_DATABASE_URL)&search_path=public" 
 
-migrate-down: check-migrate check-db-url ## Revert the last applied migration
-	@echo "Reverting last migration from $(MIGRATIONS_DIR)..."
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) down 1
-	@echo "Last migration reverted."
+atlas-apply:
+	@atlas migrate apply \
+	--dir "file://ent/migrate/migrations" \
+	--url "$(DATABASE_URL)&search_path=public" 
 
-migrate-down-all: check-migrate check-db-url ## Revert all migrations (use with caution!)
-	@echo "Reverting ALL migrations from $(MIGRATIONS_DIR)..."
-	@read -p "This will revert all migrations. Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) down -all
-	@echo "All migrations reverted."
-
-migrate-force: check-migrate check-db-url ## Force migration version (use with extreme caution!). Usage: make migrate-force VERSION=<version_number>
-	@if [ -z "$(VERSION)" ]; then \
-		echo "Error: VERSION variable is not set."; \
-		echo "Usage: make migrate-force VERSION=<version_number>"; \
-		exit 1; \
-	fi
-	@echo "Forcing migration version to $(VERSION) in $(MIGRATIONS_DIR)... (Use with caution!)"
-	@read -p "Forcing versions can lead to schema inconsistencies. Are you absolutely sure? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) force $(VERSION)
-	@echo "Migration version forced to $(VERSION)."
-
-migrate-status: check-migrate check-db-url ## Show current migration status and version
-	@echo "Checking migration status for $(MIGRATIONS_DIR)..."
-	@echo "--- Version ---"
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) version
-	@echo "--- Status ---"
-	@$(MIGRATE_CMD) -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) status || true # Allow non-zero exit if dirty/no migrations table
-
-migrate-test-up: check-migrate check-test-db-url ## Apply all 'up' migrations to the TEST database
-	@echo "Applying migrations to TEST database from $(MIGRATIONS_DIR)..."
-	@$(MIGRATE_CMD) -database "$(TEST_DATABASE_URL)" -path $(MIGRATIONS_DIR) up
-	@echo "Test database migrations applied."
-
+atlas-status:
+	@atlas migrate status \
+	--dir "file://ent/migrate/migrations" \
+	--url "$(DATABASE_URL)&search_path=public" 
 
 # --- Tool Installation ---
 
-install-migrate: ## Install the golang-migrate CLI tool (requires Go)
-	@echo "Installing golang-migrate CLI (with postgres tag)..."
-	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	@echo "migrate installed. Ensure $(go env GOPATH)/bin is in your PATH."
+install-atlas: ## Install the atlas CLI tool (requires Go)
+	@echo "Installing atlas CLI..."
+	@curl -sSf https://atlasgo.sh | sh
+	@echo "atlas installed."
 
 install-swag: ## Install the swag CLI tool (requires Go)
 	@echo "Installing swag CLI..."
@@ -133,8 +101,10 @@ docker-build-nocache: ## Build or rebuild the docker images using docker-compose
 docker-up: ## Start services in the background using docker-compose
 	@echo "Starting Docker services (db, api)..."
 	@docker-compose up -d --remove-orphans
-	@echo "Running migrations on the api..."
-	@make docker-migrate-up
+	@echo "Checking for atlas migrations on the api..."
+	@make atlas-diff
+	@echo "Running atlas migrations on the api..."
+	@make atlas-apply
 	@echo "Services started. API should be available shortly."
 	@make docker-logs # Show logs briefly after starting
 
@@ -162,52 +132,6 @@ docker-logs-db: ## Follow logs from the db service only
 
 docker-exec-api: ## Execute a command inside the running api container. Usage: make docker-exec-api CMD="ls -l"
 	@docker-compose exec api $(CMD)
-
-docker-migrate-up: check-db-url ## Run database migrations inside the api container
-	@echo "Running migrations up inside the api container..."
-	@# Construct the internal URL using Make variables
-	@INTERNAL_DB_URL="postgres://$(DB_USER):$(DB_PASSWORD)@db:5432/$(DB_NAME)?sslmode=disable"; \
-	echo "Using internal URL for -database flag: $$INTERNAL_DB_URL"; \
-	docker-compose exec api migrate \
-		-database "$$INTERNAL_DB_URL" \
-		-path ./internal/database/migrations \
-		up
-	@echo "Migrations applied."
-
-docker-migrate-down: check-db-url ## Revert last database migration inside the api container
-	@echo "Reverting last migration inside the api container..."
-	@INTERNAL_DB_URL="postgres://$(DB_USER):$(DB_PASSWORD)@db:5432/$(DB_NAME)?sslmode=disable"; \
-	echo "Using internal URL for -database flag: $$INTERNAL_DB_URL"; \
-	docker-compose exec api migrate \
-		-database "$$INTERNAL_DB_URL" \
-		-path ./internal/database/migrations \
-		down 1
-	@echo "Last migration reverted."
-
-docker-migrate-status: check-db-url ## Check migration status inside the api container
-	@echo "Checking migration status inside the api container..."
-	@INTERNAL_DB_URL="postgres://$(DB_USER):$(DB_PASSWORD)@db:5432/$(DB_NAME)?sslmode=disable"; \
-	echo "Using internal URL for -database flag: $$INTERNAL_DB_URL"; \
-	docker-compose exec api migrate \
-		-database "$$INTERNAL_DB_URL" \
-		-path ./internal/database/migrations \
-		status || true
-
-docker-migrate-force: check-db-url ## Force migration version inside the api container (use with extreme caution!). Usage: make docker-migrate-force VERSION=<version_number>
-	@if [ -z "$(VERSION)" ]; then \
-		echo "Error: VERSION variable is not set."; \
-		echo "Usage: make docker-migrate-force VERSION=<version_number>"; \
-		exit 1; \
-	fi
-	@echo "Forcing migration version to $(VERSION) inside the api container... (Use with caution!)"
-	@# Note: Confirmation prompt is difficult in non-interactive exec, removed for simplicity. Be careful!
-	@INTERNAL_DB_URL="postgres://$(DB_USER):$(DB_PASSWORD)@db:5432/$(DB_NAME)?sslmode=disable"; \
-	echo "Using internal URL for -database flag: $$INTERNAL_DB_URL"; \
-	docker-compose exec api migrate \
-		-database "$$INTERNAL_DB_URL" \
-		-path ./internal/database/migrations \
-		force $(VERSION)
-	@echo "Migration version forced to $(VERSION)."
 
 docker-db-reset: ## !! Drops and recreates the database in the Docker container (DATA LOSS!) !!
 	@echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -249,16 +173,8 @@ docker-db-reset: ## !! Drops and recreates the database in the Docker container 
 			psql -U "$(DB_USER)" -h "db" "postgres" -c "GRANT ALL PRIVILEGES ON DATABASE $(DB_NAME) TO \"$(DB_USER)\";"; \
 	fi
 	@echo "Database '$(DB_NAME)' reset successfully."
-	@echo "Run 'make docker-migrate-up' to apply migrations to the fresh database."
 
 # --- Helper Check Targets ---
-
-check-migrate:
-	@if [ -z "$(MIGRATE_CMD)" ]; then \
-		echo "Error: 'migrate' command not found in PATH."; \
-		echo "Install it using 'make install-migrate' or see https://github.com/golang-migrate/migrate"; \
-		exit 1; \
-	fi
 
 check-swag:
 	@if [ -z "$(SWAG_CMD)" ]; then \
@@ -293,32 +209,20 @@ check-test-db-url: ## Check if TEST_DATABASE_URL is set
 		exit 1; \
 	fi
 
-# --- Mocks for testing ---
+# --- Go Generate ---
 
-# Generate mocks for repositories and services
-mocks: clean-mocks ## Generate mocks for repositories and services using mockgen
-	@echo "Generating mocks..."
-	@go install github.com/golang/mock/mockgen@latest # Ensure mockgen is installed
-	@mkdir -p internal/mocks # Ensure the directory exists
-	@echo "Generating repository mocks (storage)..."
-	@mockgen -package=mocks -destination=internal/mocks/mock_storage.go go-api-template/internal/storage UserRepository,JobRepository,InvoiceRepository
-	@echo "Generating service mocks..."
-	@mockgen -package=mocks -destination=internal/mocks/mock_services.go go-api-template/internal/services UserService,JobService,InvoiceService
-	@echo "Mocks generated."
+generate:
+	@echo "Generating ent files..."
+	@go generate ./...
+	@echo "Code generated."
 
-# Clean generated mocks
-clean-mocks: ## Remove generated mock files from internal/mocks
-	@echo "Cleaning mocks..."
-	@rm -f internal/mocks/mock_storage.go
-	@rm -f internal/mocks/mock_services.go
-	@echo "Mocks cleaned."
 
 # --- Update Help Target ---
 help: ## Display this help screen
 	@echo "Usage: make <command>"
 	@echo ""
-	@echo "Available migration commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'migrate-' | grep -v 'docker-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "Available atlas commands:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep 'atlas-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Available development commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(dev|swagger-gen|test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
