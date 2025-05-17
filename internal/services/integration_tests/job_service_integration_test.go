@@ -33,9 +33,9 @@ func setupJobServiceIntegrationTest(t *testing.T) (context.Context, services.Job
 
 func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 	jobRepo := postgres.NewJobRepo(pool) // Need for verification
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	// Create prerequisite employer
 	employer := createTestUser(t, ctx, pool, "createjob-employer@test.com", "CreateJob Employer")
@@ -58,7 +58,7 @@ func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 	assert.Equal(t, createReq.InvoiceInterval, createdJob.InvoiceInterval)
 	assert.Equal(t, createReq.EmployerID, createdJob.EmployerID)
 	assert.Equal(t, job.StateWaiting, createdJob.State)
-	assert.Nil(t, createdJob.ContractorID)
+	assert.Equal(t, uuid.Nil, createdJob.ContractorID)
 
 	// Verify directly in DB
 	dbJob, dbErr := jobRepo.GetByID(ctx, &dto.GetJobByIDRequest{ID: createdJob.ID})
@@ -96,7 +96,7 @@ func TestJobService_Integration_CreateJobAndGetByID(t *testing.T) {
 func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
 	jobRepo := postgres.NewJobRepo(pool) // Need for verification
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "updatejob-employer@test.com", "UpdateJob Employer")
 	otherUser := createTestUser(t, ctx, pool, "updatejob-other@test.com", "UpdateJob Other")
@@ -212,7 +212,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 				assert.Equal(t, tt.expectedRate, updatedJob.Rate)
 				assert.Equal(t, tt.expectedDur, updatedJob.Duration)
 				assert.Equal(t, job.StateWaiting, updatedJob.State) // Should remain waiting
-				assert.Nil(t, updatedJob.ContractorID)              // Should remain nil
+				assert.Equal(t, uuid.Nil, updatedJob.ContractorID)  // Should remain nil
 				require.NotNil(t, initialJob)                       // Should exist for success case
 				assert.True(t, updatedJob.UpdatedAt.After(initialJob.UpdatedAt))
 
@@ -222,7 +222,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 				assert.Equal(t, tt.expectedRate, dbJob.Rate)
 				assert.Equal(t, tt.expectedDur, dbJob.Duration)
 				assert.Equal(t, job.StateWaiting, dbJob.State)
-				assert.Nil(t, dbJob.ContractorID)
+				assert.Equal(t, uuid.Nil, dbJob.ContractorID)
 			}
 		})
 	}
@@ -231,7 +231,7 @@ func TestJobService_Integration_UpdateJobDetails(t *testing.T) {
 func TestJobService_Integration_UpdateJobState(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
 	jobRepo := postgres.NewJobRepo(pool) // Need for verification
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "updstate-employer@test.com", "UpdState Employer")
 	contractor := createTestUser(t, ctx, pool, "updstate-contractor@test.com", "UpdState Contractor")
@@ -378,7 +378,7 @@ func TestJobService_Integration_UpdateJobState(t *testing.T) {
 func TestJobService_Integration_DeleteJob(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
 	jobRepo := postgres.NewJobRepo(pool) // Need for verification
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	employer := createTestUser(t, ctx, pool, "deletejob-employer@test.com", "DeleteJob Employer")
 	otherUser := createTestUser(t, ctx, pool, "deletejob-other@test.com", "DeleteJob Other")
@@ -478,7 +478,7 @@ func TestJobService_Integration_DeleteJob(t *testing.T) {
 // TestJobService_Integration_ListAvailableJobs tests listing available jobs with filters.
 func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	// --- Setup Data ---
 	emp1 := createTestUser(t, ctx, pool, "listavail-emp1@test.com", "ListAvail Emp1")
@@ -545,7 +545,7 @@ func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 			// Verify all returned jobs are indeed available
 			for _, j := range jobs {
 				assert.Equal(t, job.StateWaiting, j.State)
-				assert.Nil(t, j.ContractorID)
+				assert.Equal(t, uuid.Nil, j.ContractorID)
 				// Verify rate filters if applied
 				if tt.req.MinRate != nil {
 					assert.GreaterOrEqual(t, j.Rate, *tt.req.MinRate)
@@ -572,7 +572,7 @@ func TestJobService_Integration_ListAvailableJobs(t *testing.T) {
 // TestJobService_Integration_ListJobsByEmployer tests listing jobs for an employer.
 func TestJobService_Integration_ListJobsByEmployer(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	// --- Setup Data ---
 	emp1 := createTestUser(t, ctx, pool, "listemp-emp1@test.com", "ListEmp Emp1")
@@ -617,7 +617,7 @@ func TestJobService_Integration_ListJobsByEmployer(t *testing.T) {
 // TestJobService_Integration_ListJobsByContractor tests listing jobs for a contractor.
 func TestJobService_Integration_ListJobsByContractor(t *testing.T) {
 	ctx, jobService, pool := setupJobServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs")
+	defer cleanupTables(ctx, t, pool, "users", "jobs")
 
 	// --- Setup Data ---
 	emp1 := createTestUser(t, ctx, pool, "listcon-emp1@test.com", "ListCon Emp1")

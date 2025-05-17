@@ -28,7 +28,7 @@ func (Invoice) Fields() []ent.Field {
 
 		field.UUID("job_id", uuid.UUID{}).StorageKey("job_id").Immutable(),
 
-		field.Int("interval_number"),
+		field.Int("interval_number").Default(1),
 
 		field.Time("created_at").Immutable().Default(time.Now),
 		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),

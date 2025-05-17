@@ -2,6 +2,7 @@ package integration_tests
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"go-api-template/ent"
 	"go-api-template/ent/job"
@@ -13,6 +14,10 @@ import (
 	"testing"
 	"time"
 
+	entsql "entgo.io/ent/dialect/sql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"entgo.io/ent/dialect"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Driver for postgres
 	_ "github.com/golang-migrate/migrate/v4/source/file"       // Driver for file source
@@ -89,12 +94,15 @@ func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 	// Run migrations before creating the pool to ensure schema exists
 	runMigrations(t, dsn)
 
-	client, err := ent.Open("pgx", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, nil
 	}
 
-	testDB = client
+	entDriver := entsql.OpenDB(dialect.Postgres, db)
+	entClient := ent.NewClient(ent.Driver(entDriver))
+
+	testDB = entClient
 
 	// --- Redis Setup ---
 	if testRedisClient == nil {
@@ -143,7 +151,7 @@ func runMigrations(t *testing.T, dsn string) {
 }
 
 // cleanupTables truncates specified tables for test isolation.
-func cleanupTables(t *testing.T, pool *ent.Client, tables ...string) {
+func cleanupTables(ctx context.Context, t *testing.T, pool *ent.Client, tables ...string) {
 	t.Helper()
 	if len(tables) == 0 {
 		return // Nothing to clean
@@ -152,17 +160,17 @@ func cleanupTables(t *testing.T, pool *ent.Client, tables ...string) {
 	for _, table := range tables {
 		switch table {
 		case "users":
-			_, err := pool.User.Delete().Exec(context.Background())
+			_, err := pool.User.Delete().Exec(ctx)
 			require.NoError(t, err, "Failed to truncate users table")
 		case "jobs":
-			_, err := pool.Job.Delete().Exec(context.Background())
+			_, err := pool.Job.Delete().Exec(ctx)
 			require.NoError(t, err, "Failed to truncate jobs table")
 		case "invoices":
-			_, err := pool.Invoice.Delete().Exec(context.Background())
+			_, err := pool.Invoice.Delete().Exec(ctx)
 			require.NoError(t, err, "Failed to truncate invoices table")
 		case "job_application":
-			_, err := pool.JobApplication.Delete().Exec(context.Background())
-			require.NoError(t, err, "Failed to truncate job_applications table")
+			_, err := pool.JobApplication.Delete().Exec(ctx)
+			require.NoError(t, err, "Failed to truncate job_application table")
 		default:
 		}
 	}

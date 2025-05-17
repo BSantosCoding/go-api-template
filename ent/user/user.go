@@ -48,10 +48,10 @@ const (
 	// JobsAsContractorColumn is the table column denoting the jobsAsContractor relation/edge.
 	JobsAsContractorColumn = "contractor_id"
 	// ApplicationsAsContractorTable is the table that holds the applicationsAsContractor relation/edge.
-	ApplicationsAsContractorTable = "job_applications"
+	ApplicationsAsContractorTable = "job_application"
 	// ApplicationsAsContractorInverseTable is the table name for the JobApplication entity.
 	// It exists in this package in order to avoid circular dependency with the "jobapplication" package.
-	ApplicationsAsContractorInverseTable = "job_applications"
+	ApplicationsAsContractorInverseTable = "job_application"
 	// ApplicationsAsContractorColumn is the table column denoting the applicationsAsContractor relation/edge.
 	ApplicationsAsContractorColumn = "contractor_id"
 )

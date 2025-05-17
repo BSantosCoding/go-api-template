@@ -41,7 +41,7 @@ func setupUserServiceIntegrationTest(t *testing.T) (context.Context, services.Us
 
 func TestUserService_Integration_RegisterAndGet(t *testing.T) {
 	ctx, userService, pool, _ := setupUserServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 
 	// --- Register ---
 	registerReq := &dto.CreateUserRequest{
@@ -106,7 +106,7 @@ func TestUserService_Integration_RegisterAndGet(t *testing.T) {
 func TestUserService_Integration_Update(t *testing.T) {
 	ctx, userService, pool, _ := setupUserServiceIntegrationTest(t)
 	userRepo := postgres.NewUserRepo(pool) // For setup/verification
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 
 	// --- Setup: Create a user ---
 	initialEmail := "update-user@test.com"
@@ -156,7 +156,7 @@ func TestUserService_Integration_Update(t *testing.T) {
 func TestUserService_Integration_Delete(t *testing.T) {
 	ctx, userService, pool, _ := setupUserServiceIntegrationTest(t)
 	userRepo := postgres.NewUserRepo(pool) // For setup/verification
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 
 	// --- Setup: Create a user ---
 	registerReq := &dto.CreateUserRequest{
@@ -191,7 +191,7 @@ func TestUserService_Integration_Delete(t *testing.T) {
 func TestUserService_Integration_GetAll(t *testing.T) {
 	ctx, userService, pool, _ := setupUserServiceIntegrationTest(t)
 	userRepo := postgres.NewUserRepo(pool) // For setup
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 
 	// --- Setup: Create multiple users ---
 	user1, err := userRepo.Create(ctx, &dto.CreateUserRequest{Email: "getall1@test.com", Name: "GetAll One", Password: "p"})
@@ -224,7 +224,7 @@ func TestUserService_Integration_Login(t *testing.T) {
 		t.Skip("Skipping Redis test: TEST_REDIS_URL not set or connection failed")
 	}
 	userRepo := postgres.NewUserRepo(pool) // For setup
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 	defer cleanupRedis(t, redisClient)
 
 	// --- Setup: Create a user ---
@@ -288,7 +288,7 @@ func TestUserService_Integration_Refresh(t *testing.T) {
 		t.Skip("Skipping Redis test: TEST_REDIS_URL not set or connection failed")
 	}
 	userRepo := postgres.NewUserRepo(pool) // For setup
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 	defer cleanupRedis(t, redisClient)
 
 	// --- Setup: Create user and perform initial login to get a refresh token ---
@@ -340,7 +340,7 @@ func TestUserService_Integration_Logout(t *testing.T) {
 		t.Skip("Skipping Redis test: TEST_REDIS_URL not set or connection failed")
 	}
 	userRepo := postgres.NewUserRepo(pool) // For setup
-	defer cleanupTables(t, pool, "users")
+	defer cleanupTables(ctx, t, pool, "users")
 	defer cleanupRedis(t, redisClient)
 
 	// --- Setup: Create user and login ---

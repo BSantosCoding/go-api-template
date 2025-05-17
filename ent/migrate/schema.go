@@ -3,6 +3,7 @@
 package migrate
 
 import (
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/schema/field"
 )
@@ -64,8 +65,8 @@ var (
 			},
 		},
 	}
-	// JobApplicationsColumns holds the columns for the "job_applications" table.
-	JobApplicationsColumns = []*schema.Column{
+	// JobApplicationColumns holds the columns for the "job_application" table.
+	JobApplicationColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "state", Type: field.TypeEnum, Enums: []string{"Waiting", "Accepted", "Rejected", "Withdrawn"}, Default: "Waiting"},
 		{Name: "created_at", Type: field.TypeTime},
@@ -73,21 +74,21 @@ var (
 		{Name: "job_id", Type: field.TypeUUID},
 		{Name: "contractor_id", Type: field.TypeUUID},
 	}
-	// JobApplicationsTable holds the schema information for the "job_applications" table.
-	JobApplicationsTable = &schema.Table{
-		Name:       "job_applications",
-		Columns:    JobApplicationsColumns,
-		PrimaryKey: []*schema.Column{JobApplicationsColumns[0]},
+	// JobApplicationTable holds the schema information for the "job_application" table.
+	JobApplicationTable = &schema.Table{
+		Name:       "job_application",
+		Columns:    JobApplicationColumns,
+		PrimaryKey: []*schema.Column{JobApplicationColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "job_applications_jobs_applications",
-				Columns:    []*schema.Column{JobApplicationsColumns[4]},
+				Symbol:     "job_application_jobs_applications",
+				Columns:    []*schema.Column{JobApplicationColumns[4]},
 				RefColumns: []*schema.Column{JobsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
-				Symbol:     "job_applications_users_applicationsAsContractor",
-				Columns:    []*schema.Column{JobApplicationsColumns[5]},
+				Symbol:     "job_application_users_applicationsAsContractor",
+				Columns:    []*schema.Column{JobApplicationColumns[5]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -112,7 +113,7 @@ var (
 	Tables = []*schema.Table{
 		InvoicesTable,
 		JobsTable,
-		JobApplicationsTable,
+		JobApplicationTable,
 		UsersTable,
 	}
 )
@@ -121,6 +122,9 @@ func init() {
 	InvoicesTable.ForeignKeys[0].RefTable = JobsTable
 	JobsTable.ForeignKeys[0].RefTable = UsersTable
 	JobsTable.ForeignKeys[1].RefTable = UsersTable
-	JobApplicationsTable.ForeignKeys[0].RefTable = JobsTable
-	JobApplicationsTable.ForeignKeys[1].RefTable = UsersTable
+	JobApplicationTable.ForeignKeys[0].RefTable = JobsTable
+	JobApplicationTable.ForeignKeys[1].RefTable = UsersTable
+	JobApplicationTable.Annotation = &entsql.Annotation{
+		Table: "job_application",
+	}
 }

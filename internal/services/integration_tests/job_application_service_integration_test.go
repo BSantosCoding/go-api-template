@@ -39,12 +39,7 @@ func createTestApplication(t *testing.T, ctx context.Context, pool *ent.Client, 
 		ContractorID: contractorID,
 	}
 	app, err := appRepo.Create(ctx, appReq)
-	// Handle potential conflict if test setup calls this multiple times for same pair
 	if err != nil && errors.Is(err, storage.ErrConflict) {
-		// If it already exists, try to fetch it instead
-		// This requires a method like GetByJobAndContractor, which might not exist.
-		// For simplicity in this example, we'll require no error on create.
-		// A better approach might be to query first, then create if not found.
 		require.NoError(t, err, "Failed to create test application (or handle existing)")
 	} else {
 		require.NoError(t, err, "Failed to create test application")
@@ -65,7 +60,7 @@ func createTestApplication(t *testing.T, ctx context.Context, pool *ent.Client, 
 func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
 	appRepo := postgres.NewJobApplicationRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer := createTestUser(t, ctx, pool, "apply-employer@test.com", "Apply Employer")
 	contractor := createTestUser(t, ctx, pool, "apply-contractor@test.com", "Apply Contractor")
@@ -122,7 +117,7 @@ func TestJobApplicationService_Integration_ApplyToJob(t *testing.T) {
 				ContractorID: contractor.ID, // Same as first success case
 			},
 			expectedErr:   services.ErrConflict,
-			errorContains: "already exists",
+			errorContains: "duplicate",
 		},
 	}
 
@@ -174,7 +169,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
 	jobRepo := postgres.NewJobRepo(pool)            // For verification
 	appRepo := postgres.NewJobApplicationRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	// Create users once for all tests in this function
 	employer := createTestUser(t, ctx, pool, "accept-employer@test.com", "Accept Employer")
@@ -190,7 +185,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 		setupFunc            func() (targetAppID, otherAppID, targetJobID uuid.UUID) // Returns IDs needed for the test
 		req                  *dto.AcceptApplicationRequest
 		expectedJobState     job.State
-		expectedContractorID *uuid.UUID
+		expectedContractorID uuid.UUID
 		expectedApp1State    jobapplication.State // State of app being accepted/targeted
 		expectedApp2State    jobapplication.State // State of the *other* waiting app (if applicable)
 		expectedErr          error
@@ -209,7 +204,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 				UserID: employer.ID, // Correct employer
 			},
 			expectedJobState:     job.StateOngoing,
-			expectedContractorID: &contractor1.ID,
+			expectedContractorID: contractor1.ID,
 			expectedApp1State:    jobapplication.StateAccepted,
 			expectedApp2State:    jobapplication.StateRejected, // Other app should be rejected
 			expectedErr:          nil,
@@ -227,7 +222,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 			},
 			// Expect no changes
 			expectedJobState:     job.StateWaiting, // Remains waiting
-			expectedContractorID: nil,
+			expectedContractorID: uuid.Nil,
 			expectedApp1State:    jobapplication.StateWaiting, // Should remain waiting
 			expectedApp2State:    jobapplication.StateWaiting, // Not applicable here, but default check
 			expectedErr:          services.ErrForbidden,
@@ -280,7 +275,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 			var targetAppID, otherAppID, targetJobID uuid.UUID
 			// Get initial state defaults for verification on failure
 			initialJobState := job.StateWaiting
-			initialContractorID := (*uuid.UUID)(nil)
+			initialContractorID := uuid.Nil
 			initialApp1State := jobapplication.StateWaiting
 			initialApp2State := jobapplication.StateWaiting
 
@@ -293,7 +288,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 					initialJob, err := jobRepo.GetByID(ctx, &dto.GetJobByIDRequest{ID: targetJobID})
 					if err == nil {
 						initialJobState = initialJob.State
-						initialContractorID = &initialJob.ContractorID
+						initialContractorID = initialJob.ContractorID
 					}
 				}
 				if targetAppID != uuid.Nil {
@@ -381,7 +376,7 @@ func TestJobApplicationService_Integration_AcceptApplication(t *testing.T) {
 func TestJobApplicationService_Integration_RejectApplication(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
 	appRepo := postgres.NewJobApplicationRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer := createTestUser(t, ctx, pool, "reject-employer@test.com", "Reject Employer")
 	contractor := createTestUser(t, ctx, pool, "reject-contractor@test.com", "Reject Contractor")
@@ -487,7 +482,7 @@ func TestJobApplicationService_Integration_RejectApplication(t *testing.T) {
 func TestJobApplicationService_Integration_WithdrawApplication(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
 	appRepo := postgres.NewJobApplicationRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer := createTestUser(t, ctx, pool, "withdraw-employer@test.com", "Withdraw Employer")
 	contractor := createTestUser(t, ctx, pool, "withdraw-contractor@test.com", "Withdraw Contractor")
@@ -592,7 +587,7 @@ func TestJobApplicationService_Integration_WithdrawApplication(t *testing.T) {
 // TestJobApplicationService_Integration_GetApplicationByID tests getting an application by ID.
 func TestJobApplicationService_Integration_GetApplicationByID(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer := createTestUser(t, ctx, pool, "getapp-employer@test.com", "GetApp Employer")
 	contractor := createTestUser(t, ctx, pool, "getapp-contractor@test.com", "GetApp Contractor")
@@ -649,7 +644,7 @@ func TestJobApplicationService_Integration_GetApplicationByID(t *testing.T) {
 // TestJobApplicationService_Integration_ListApplicationsByContractor tests listing applications for a contractor.
 func TestJobApplicationService_Integration_ListApplicationsByContractor(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer1 := createTestUser(t, ctx, pool, "listcon-emp1@test.com", "ListCon Emp1")
 	contractor1 := createTestUser(t, ctx, pool, "listcon-con1@test.com", "ListCon Con1")
@@ -696,7 +691,7 @@ func TestJobApplicationService_Integration_ListApplicationsByContractor(t *testi
 // TestJobApplicationService_Integration_ListApplicationsByJob tests listing applications for a job.
 func TestJobApplicationService_Integration_ListApplicationsByJob(t *testing.T) {
 	ctx, jobAppService, pool := setupJobApplicationServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs", "job_application")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "job_application")
 
 	employer := createTestUser(t, ctx, pool, "listjob-emp@test.com", "ListJob Emp")
 	contractor1 := createTestUser(t, ctx, pool, "listjob-con1@test.com", "ListJob Con1")

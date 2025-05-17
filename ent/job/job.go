@@ -64,10 +64,10 @@ const (
 	// InvoicesColumn is the table column denoting the invoices relation/edge.
 	InvoicesColumn = "job_id"
 	// ApplicationsTable is the table that holds the applications relation/edge.
-	ApplicationsTable = "job_applications"
+	ApplicationsTable = "job_application"
 	// ApplicationsInverseTable is the table name for the JobApplication entity.
 	// It exists in this package in order to avoid circular dependency with the "jobapplication" package.
-	ApplicationsInverseTable = "job_applications"
+	ApplicationsInverseTable = "job_application"
 	// ApplicationsColumn is the table column denoting the applications relation/edge.
 	ApplicationsColumn = "job_id"
 )

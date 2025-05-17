@@ -57,8 +57,9 @@ func createTestInvoice(t *testing.T, ctx context.Context, pool *ent.Client, jobI
 
 func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 	ctx, invoiceService, pool := setupInvoiceServiceIntegrationTest(t)
+	require.NotNil(t, pool, "Database client should not be nil after getTestClients")
 	invoiceRepo := postgres.NewInvoiceRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "invoices")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "invoices")
 
 	employer := createTestUser(t, ctx, pool, "invoice-employer@test.com", "Invoice Employer")
 	contractor := createTestUser(t, ctx, pool, "invoice-contractor@test.com", "Invoice Contractor")
@@ -195,7 +196,7 @@ func TestInvoiceService_Integration_CreateInvoice(t *testing.T) {
 
 func TestInvoiceService_Integration_GetInvoiceByID(t *testing.T) {
 	ctx, invoiceService, pool := setupInvoiceServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs", "invoices")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "invoices")
 
 	employer := createTestUser(t, ctx, pool, "getinv-employer@test.com", "GetInv Employer")
 	contractor := createTestUser(t, ctx, pool, "getinv-contractor@test.com", "GetInv Contractor")
@@ -257,7 +258,7 @@ func TestInvoiceService_Integration_GetInvoiceByID(t *testing.T) {
 func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 	ctx, invoiceService, pool := setupInvoiceServiceIntegrationTest(t)
 	invoiceRepo := postgres.NewInvoiceRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "invoices")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "invoices")
 
 	employer := createTestUser(t, ctx, pool, "updinv-employer@test.com", "UpdInv Employer")
 	contractor := createTestUser(t, ctx, pool, "updinv-contractor@test.com", "UpdInv Contractor")
@@ -373,7 +374,7 @@ func TestInvoiceService_Integration_UpdateInvoiceState(t *testing.T) {
 func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 	ctx, invoiceService, pool := setupInvoiceServiceIntegrationTest(t)
 	invoiceRepo := postgres.NewInvoiceRepo(pool) // For verification
-	defer cleanupTables(t, pool, "users", "jobs", "invoices")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "invoices")
 
 	employer := createTestUser(t, ctx, pool, "delinv-employer@test.com", "DelInv Employer")
 	contractor := createTestUser(t, ctx, pool, "delinv-contractor@test.com", "DelInv Contractor")
@@ -473,7 +474,7 @@ func TestInvoiceService_Integration_DeleteInvoice(t *testing.T) {
 // TestInvoiceService_Integration_ListInvoicesByJob tests listing invoices for a job.
 func TestInvoiceService_Integration_ListInvoicesByJob(t *testing.T) {
 	ctx, invoiceService, pool := setupInvoiceServiceIntegrationTest(t)
-	defer cleanupTables(t, pool, "users", "jobs", "invoices")
+	defer cleanupTables(ctx, t, pool, "users", "jobs", "invoices")
 
 	// --- Setup Data ---
 	employer1 := createTestUser(t, ctx, pool, "listinv-emp1@test.com", "ListInv Employer 1")

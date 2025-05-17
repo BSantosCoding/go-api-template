@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 
@@ -123,18 +124,24 @@ func (r *InvoiceRepo) Delete(ctx context.Context, req *dto.DeleteInvoiceRequest)
 }
 
 func (r *InvoiceRepo) GetMaxIntervalForJob(ctx context.Context, req *dto.GetMaxIntervalForJobRequest) (int, error) {
-	maxInterval, err := r.client.Invoice.Query().
+	type maxIntervalScanResult struct {
+		Max sql.NullInt64 `sql:"max"`
+	}
+
+	var result []maxIntervalScanResult
+	err := r.client.Invoice.Query().
 		Where(invoice.JobID(req.JobID)).
 		Aggregate(ent.Max(invoice.FieldIntervalNumber)).
-		Int(ctx)
+		Scan(ctx, &result)
 
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return 0, nil
-		}
+		// Log and return the error if the query itself failed.
 		log.Printf("Error querying max interval for job %s: %v\n", req.JobID, err)
 		return 0, fmt.Errorf("failed to query max interval number for job %s: %w", req.JobID, err)
 	}
+	if len(result) == 0 || !result[0].Max.Valid {
+		return 0, nil
+	}
 
-	return maxInterval, nil
+	return int(result[0].Max.Int64), nil
 }

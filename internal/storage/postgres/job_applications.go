@@ -34,7 +34,7 @@ func (r *JobApplicationRepo) Create(ctx context.Context, req *dto.CreateJobAppli
 	createdApp, err := r.client.JobApplication.Create().
 		SetContractorID(req.ContractorID).
 		SetJobID(req.JobID).
-		SetState(jobapplication.State(jobapplication.StateWaiting)).
+		SetState(jobapplication.StateWaiting).
 		Save(ctx)
 
 	if err != nil {

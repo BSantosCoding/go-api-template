@@ -31,16 +31,16 @@ const (
 	// EdgeJob holds the string denoting the job edge name in mutations.
 	EdgeJob = "job"
 	// Table holds the table name of the jobapplication in the database.
-	Table = "job_applications"
+	Table = "job_application"
 	// ContractorTable is the table that holds the contractor relation/edge.
-	ContractorTable = "job_applications"
+	ContractorTable = "job_application"
 	// ContractorInverseTable is the table name for the User entity.
 	// It exists in this package in order to avoid circular dependency with the "user" package.
 	ContractorInverseTable = "users"
 	// ContractorColumn is the table column denoting the contractor relation/edge.
 	ContractorColumn = "contractor_id"
 	// JobTable is the table that holds the job relation/edge.
-	JobTable = "job_applications"
+	JobTable = "job_application"
 	// JobInverseTable is the table name for the Job entity.
 	// It exists in this package in order to avoid circular dependency with the "job" package.
 	JobInverseTable = "jobs"

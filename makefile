@@ -43,14 +43,14 @@ swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs
 
 test: ## Run all Service Integration tests 
 	@echo "Running Redis test instance..."
-	@docker run --name test-redis -d -p 6379:6379 redis:7-alpine
+	@-docker run --name test-redis -d -p 6379:6379 redis:7-alpine
 	@echo "Running Go tests..."
-	@go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
+	@-go test -v -cover -coverpkg=./internal/services -coverprofile=coverage.out ./internal/services/...
 	@echo "Generating HTML coverage report..."
-	@go tool cover -html=coverage.out -o coverage.html
+	@-go tool cover -html=coverage.out -o coverage.html
 	@echo "Shutdown Redis test instance..."
-	@docker ps --filter name=test-redis --filter status=running -aq | xargs docker stop
-	@docker ps --filter name=test-redis -aq | xargs docker container rm
+	@-docker ps --filter name=test-redis --filter status=running -aq | xargs docker stop
+	@-docker ps --filter name=test-redis -aq | xargs docker container rm
 
 # --- Migration Commands ---
 

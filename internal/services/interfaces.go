@@ -6,8 +6,6 @@ import (
 	"go-api-template/internal/transport/dto"
 )
 
-//go:generate mockgen -source=interfaces.go -destination=../mocks/mock_services.go -package=mocks
-
 // UserService defines the interface for user-related business logic.
 type UserService interface {
 	Register(ctx context.Context, req *dto.CreateUserRequest) (*ent.User, error)

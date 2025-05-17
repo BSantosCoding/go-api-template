@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:generate mockgen -source=storage.go -destination=../mocks/mock_repositorys.go -package=mocks
-
 // UserRepository defines the interface for user data operations.
 type UserRepository interface {
 	GetAll(ctx context.Context) ([]*ent.User, error)
