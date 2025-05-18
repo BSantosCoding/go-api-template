@@ -27,15 +27,16 @@ func NewUserHandler(userService services.UserService, validate *validator.Valida
 }
 
 // GetUsers godoc
-// @Summary      List all users
-// @Description  Retrieves a list of all registered users.
-// @Tags         users
-// @Accept       json
-// @Produce      json
-// @Success      200  {array}   dto.UserResponse "Successfully retrieved list of users" // UPDATED response type
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /users [get]
-// @Security     BearerAuth
+//
+//	@Summary		List all users
+//	@Description	Retrieves a list of all registered users.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{array}		dto.UserResponse				"Successfully retrieved list of users"	//	UPDATED	response	type
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/users [get]
+//	@Security		BearerAuth
 func (h *UserHandler) GetUsers(c *gin.Context) {
 	users, err := h.service.GetAll(c.Request.Context()) // Use h.repo and pass context
 	if err != nil {
@@ -54,18 +55,19 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 }
 
 // GetUserByID godoc
-// @Summary      Get a user by ID
-// @Description  Retrieves details for a specific user by their ID.
-// @Tags         users
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "User ID" Format(uuid) // Specify path param
-// @Success      200  {object}  dto.UserResponse "Successfully retrieved user" // Ensure this is already dto.UserResponse
-// @Failure      400  {object}  map[string]string{error=string} "Invalid user ID format"
-// @Failure      404  {object}  map[string]string{error=string} "User Not Found"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /users/{id} [get]
-// @Security     BearerAuth
+//
+//	@Summary		Get a user by ID
+//	@Description	Retrieves details for a specific user by their ID.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string							true							"User ID"	Format(uuid)	//		Specify	path	param
+//	@Success		200	{object}	dto.UserResponse				"Successfully retrieved user"	//			Ensure			this	is		already	dto.UserResponse
+//	@Failure		400	{object}	map[string]string	"Invalid user ID format"
+//	@Failure		404	{object}	map[string]string	"User Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/users/{id} [get]
+//	@Security		BearerAuth
 func (h *UserHandler) GetUserByID(c *gin.Context) {
 	idStr := c.Param("id") // Get ID from URL path as string
 
@@ -97,17 +99,18 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 // --- Authentication Handlers ---
 
 // Register godoc
-// @Summary      Register a new user
-// @Description  Adds a new user to the database with a hashed password.
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        user body      dto.CreateUserRequest true  "User registration details (ID is ignored/generated)"
-// @Success      201  {object}  dto.UserResponse "User registered successfully"
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
-// @Failure      409  {object}  map[string]string{error=string} "Conflict - Email already exists"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/register [post]
+//
+//	@Summary		Register a new user
+//	@Description	Adds a new user to the database with a hashed password.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			user	body		dto.CreateUserRequest			true	"User registration details (ID is ignored/generated)"
+//	@Success		201		{object}	dto.UserResponse				"User registered successfully"
+//	@Failure		400		{object}	map[string]string	"Bad Request - Invalid input or validation failed"
+//	@Failure		409		{object}	map[string]string	"Conflict - Email already exists"
+//	@Failure		500		{object}	map[string]string	"Internal Server Error"
+//	@Router			/auth/register [post]
 func (h *UserHandler) Register(c *gin.Context) {
 	var req dto.CreateUserRequest
 
@@ -146,17 +149,18 @@ func (h *UserHandler) Register(c *gin.Context) {
 }
 
 // Login godoc
-// @Summary      Log in a user
-// @Description  Authenticates a user based on email and password. Returns user details (and later a token).
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        credentials body      dto.LoginRequest true  "User login credentials"
-// @Success      200  {object}  dto.LoginResponse "Login successful"
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
-// @Failure      401  {object}  map[string]string{error=string} "Unauthorized - Invalid credentials"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/login [post]
+//
+//	@Summary		Log in a user
+//	@Description	Authenticates a user based on email and password. Returns user details (and later a token).
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			credentials	body		dto.LoginRequest				true	"User login credentials"
+//	@Success		200			{object}	dto.LoginResponse				"Login successful"
+//	@Failure		400			{object}	map[string]string	"Bad Request - Invalid input or validation failed"
+//	@Failure		401			{object}	map[string]string	"Unauthorized - Invalid credentials"
+//	@Failure		500			{object}	map[string]string	"Internal Server Error"
+//	@Router			/auth/login [post]
 func (h *UserHandler) Login(c *gin.Context) {
 	var req dto.LoginRequest
 
@@ -194,17 +198,18 @@ func (h *UserHandler) Login(c *gin.Context) {
 }
 
 // Refresh godoc
-// @Summary      Refresh access token
-// @Description  Provides a new access token and refresh token using a valid refresh token.
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        refreshRequest body      dto.RefreshRequest true  "Refresh token"
-// @Success      200  {object}  dto.LoginResponse "Token refreshed successfully" // Reusing LoginResponse structure
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input"
-// @Failure      401  {object}  map[string]string{error=string} "Unauthorized - Invalid or expired refresh token"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/refresh [post]
+//
+//	@Summary		Refresh access token
+//	@Description	Provides a new access token and refresh token using a valid refresh token.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			refreshRequest	body		dto.RefreshRequest				true							"Refresh token"
+//	@Success		200				{object}	dto.RefreshResponse				"Token refreshed successfully"	//	Reusing	LoginResponse	structure
+//	@Failure		400				{object}	map[string]string	"Bad Request - Invalid input"
+//	@Failure		401				{object}	map[string]string	"Unauthorized - Invalid or expired refresh token"
+//	@Failure		500				{object}	map[string]string	"Internal Server Error"
+//	@Router			/auth/refresh [post]
 func (h *UserHandler) Refresh(c *gin.Context) {
 	var req dto.RefreshRequest
 
@@ -224,9 +229,9 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	refreshResponse := gin.H{
-		"accessToken":  newAccessToken,
-		"refreshToken": newRefreshToken,
+	refreshResponse := dto.RefreshResponse{
+		Token:        newAccessToken,
+		RefreshToken: newRefreshToken,
 	}
 
 	log.Println("Token refreshed successfully")
@@ -234,16 +239,17 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 }
 
 // Logout godoc
-// @Summary      Log out user
-// @Description  Invalidates the user's refresh token.
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        refreshRequest body      dto.RefreshRequest true  "Refresh token to invalidate" // Reusing RefreshRequest DTO
-// @Success      204  {object}  nil "Logout successful"
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /auth/logout [post]
+//
+//	@Summary		Log out user
+//	@Description	Invalidates the user's refresh token.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			refreshRequest	body		dto.RefreshRequest				true	"Refresh token to invalidate"	//	Reusing	RefreshRequest	DTO
+//	@Success		204				{object}	nil								"Logout successful"
+//	@Failure		400				{object}	map[string]string	"Bad Request - Invalid input"
+//	@Failure		500				{object}	map[string]string	"Internal Server Error"
+//	@Router			/auth/logout [post]
 func (h *UserHandler) Logout(c *gin.Context) {
 	var req dto.LogoutRequest // Reuse RefreshRequest to get the token
 
@@ -261,22 +267,23 @@ func (h *UserHandler) Logout(c *gin.Context) {
 }
 
 // UpdateUser godoc
-// @Summary      Update an existing user
-// @Description  Updates details for an existing user identified by ID.
-// @Tags         users
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string      true  "User ID" Format(uuid)
-// @Param        user body      dto.UpdateUserRequest true  "User object with updated fields" // Use DTO for body param
-// @Success      200  {object}  dto.UserResponse "User updated successfully" // UPDATED response type
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid input or validation failed"
-// @Failure 	 401  {object}  map[string]string{error=string} "Unauthorized - Invalid token"
-// @Failure      403  {object}  map[string]string{error=string} "Forbidden - Not allowed to update this user"
-// @Failure      404  {object}  map[string]string{error=string} "User Not Found"
-// @Failure      409  {object}  map[string]string{error=string} "Conflict - e.g., duplicate email"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /users/{id} [put]
-// @Security     BearerAuth
+//
+//	@Summary		Update an existing user
+//	@Description	Updates details for an existing user identified by ID.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string							true						"User ID"							Format(uuid)
+//	@Param			user	body		dto.UpdateUserRequest			true						"User object with updated fields"	//		Use			DTO	for	body	param
+//	@Success		200		{object}	dto.UserResponse				"User updated successfully"	//									UPDATED	response	type
+//	@Failure		400		{object}	map[string]string	"Bad Request - Invalid input or validation failed"
+//	@Failure		401		{object}	map[string]string	"Unauthorized - Invalid token"
+//	@Failure		403		{object}	map[string]string	"Forbidden - Not allowed to update this user"
+//	@Failure		404		{object}	map[string]string	"User Not Found"
+//	@Failure		409		{object}	map[string]string	"Conflict - e.g., duplicate email"
+//	@Failure		500		{object}	map[string]string	"Internal Server Error"
+//	@Router			/users/{id} [put]
+//	@Security		BearerAuth
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	idStr := c.Param("id")
 
@@ -330,20 +337,21 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 }
 
 // DeleteUser godoc
-// @Summary      Delete a user by ID
-// @Description  Removes a user from the database by their ID.
-// @Tags         users
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "User ID" Format(uuid)
-// @Success      204  {object}  nil "User deleted successfully" // 204 No Content
-// @Failure      400  {object}  map[string]string{error=string} "Bad Request - Invalid user ID format"
-// @Failure 	 401  {object}  map[string]string{error=string} "Unauthorized - Invalid token"
-// @Failure      403  {object}  map[string]string{error=string} "Forbidden - Not allowed to delete this user"
-// @Failure      404  {object}  map[string]string{error=string} "User Not Found"
-// @Failure      500  {object}  map[string]string{error=string} "Internal Server Error"
-// @Router       /users/{id} [delete]
-// @Security     BearerAuth
+//
+//	@Summary		Delete a user by ID
+//	@Description	Removes a user from the database by their ID.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string							true						"User ID"	Format(uuid)
+//	@Success		204	{object}	nil								"User deleted successfully"	//			204	No	Content
+//	@Failure		400	{object}	map[string]string	"Bad Request - Invalid user ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized - Invalid token"
+//	@Failure		403	{object}	map[string]string	"Forbidden - Not allowed to delete this user"
+//	@Failure		404	{object}	map[string]string	"User Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/users/{id} [delete]
+//	@Security		BearerAuth
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id := c.Param("id")
 

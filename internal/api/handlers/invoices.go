@@ -28,20 +28,20 @@ func NewInvoiceHandler(service services.InvoiceService, validate *validator.Vali
 }
 
 // CreateInvoice godoc
-// @Summary      Create an invoice for a job
-// @Description  Creates the next sequential invoice for a specified job, calculating value based on job rate/interval and applying optional adjustment. Handles partial final intervals. Requires user to be the assigned contractor and job to be 'Ongoing'.
-// @Tags         invoices
-// @Accept       json
-// @Produce      json
-// @Param        invoice body      dto.CreateInvoiceRequest true  "Invoice creation details (JobID and optional Adjustment)"
-// @Success      201 {object}  dto.InvoiceResponse "Invoice created successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid input, job not found, or invoice not allowed (e.g., max intervals reached)"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the contractor for this job or job not ongoing"
-// @Failure      409 {object}  map[string]string "Conflict - Invoice for this interval already exists"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /invoices [post]
-// @Security     BearerAuth
+//	@Summary		Create an invoice for a job
+//	@Description	Creates the next sequential invoice for a specified job, calculating value based on job rate/interval and applying optional adjustment. Handles partial final intervals. Requires user to be the assigned contractor and job to be 'Ongoing'.
+//	@Tags			invoices
+//	@Accept			json
+//	@Produce		json
+//	@Param			invoice	body		dto.CreateInvoiceRequest	true	"Invoice creation details (JobID and optional Adjustment)"
+//	@Success		201		{object}	dto.InvoiceResponse			"Invoice created successfully"
+//	@Failure		400		{object}	map[string]string			"Bad Request - Invalid input, job not found, or invoice not allowed (e.g., max intervals reached)"
+//	@Failure		401		{object}	map[string]string			"Unauthorized"
+//	@Failure		403		{object}	map[string]string			"Forbidden - User is not the contractor for this job or job not ongoing"
+//	@Failure		409		{object}	map[string]string			"Conflict - Invoice for this interval already exists"
+//	@Failure		500		{object}	map[string]string			"Internal Server Error"
+//	@Router			/invoices [post]
+//	@Security		BearerAuth
 func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -87,20 +87,20 @@ func (h *InvoiceHandler) CreateInvoice(c *gin.Context) {
 }
 
 // GetInvoiceByID godoc
-// @Summary      Get an invoice by ID
-// @Description  Retrieves details for a specific invoice by its ID. Requires user to be associated with the job (employer or contractor).
-// @Tags         invoices
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Invoice ID" Format(uuid)
-// @Success      200 {object}  dto.InvoiceResponse "Successfully retrieved invoice"
-// @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User not associated with this invoice's job"
-// @Failure      404 {object}  map[string]string "Invoice Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /invoices/{id} [get]
-// @Security     BearerAuth
+//	@Summary		Get an invoice by ID
+//	@Description	Retrieves details for a specific invoice by its ID. Requires user to be associated with the job (employer or contractor).
+//	@Tags			invoices
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Invoice ID"	Format(uuid)
+//	@Success		200	{object}	dto.InvoiceResponse	"Successfully retrieved invoice"
+//	@Failure		400	{object}	map[string]string	"Invalid ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized"
+//	@Failure		403	{object}	map[string]string	"Forbidden - User not associated with this invoice's job"
+//	@Failure		404	{object}	map[string]string	"Invoice Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/invoices/{id} [get]
+//	@Security		BearerAuth
 func (h *InvoiceHandler) GetInvoiceByID(c *gin.Context) {
 	// Get UserID from auth context
 	userID, err := middleware.GetUserIDFromContext(c)
@@ -142,23 +142,23 @@ func (h *InvoiceHandler) GetInvoiceByID(c *gin.Context) {
 }
 
 // ListInvoicesByJob godoc
-// @Summary      List invoices for a specific job
-// @Description  Retrieves a list of invoices associated with a given job ID. Requires user to be associated with the job. Supports filtering and pagination.
-// @Tags         invoices
-// @Accept       json
-// @Produce      json
-// @Param        id path string true "Job ID" Format(uuid)
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Param        state query string false "Filter by state (Waiting, Complete)" Enums(Waiting, Complete)
-// @Success      200 {array}   dto.InvoiceResponse "Successfully retrieved list of invoices"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid Job ID format or query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User not associated with this job"
-// @Failure      404 {object}  map[string]string "Job Not Found" // Check if job exists first
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{jobId}/invoices [get] // Example route nesting
-// @Security     BearerAuth
+//	@Summary		List invoices for a specific job
+//	@Description	Retrieves a list of invoices associated with a given job ID. Requires user to be associated with the job. Supports filtering and pagination.
+//	@Tags			invoices
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string				true	"Job ID"								Format(uuid)
+//	@Param			limit	query		int					false	"Pagination limit"						default(10)
+//	@Param			offset	query		int					false	"Pagination offset"						default(0)
+//	@Param			state	query		string				false	"Filter by state (Waiting, Complete)"	Enums(Waiting, Complete)
+//	@Success		200		{array}		dto.InvoiceResponse	"Successfully retrieved list of invoices"
+//	@Failure		400		{object}	map[string]string	"Bad Request - Invalid Job ID format or query parameters"
+//	@Failure		401		{object}	map[string]string	"Unauthorized"
+//	@Failure		403		{object}	map[string]string	"Forbidden - User not associated with this job"
+//	@Failure		404		{object}	map[string]string	"Job Not Found"	//	Check	if	job	exists	first
+//	@Failure		500		{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/{id}/invoices [get] // Example route nesting
+//	@Security		BearerAuth
 func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 	// Get UserID from auth context
 	userID, err := middleware.GetUserIDFromContext(c)
@@ -221,21 +221,21 @@ func (h *InvoiceHandler) ListInvoicesByJob(c *gin.Context) {
 }
 
 // UpdateInvoiceState godoc
-// @Summary      Update invoice state
-// @Description  Updates the state of an invoice (e.g., from 'Waiting' to 'Complete'). ONLY allowed by the assigned contractor.
-// @Tags         invoices
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Invoice ID" Format(uuid)
-// @Param        state body      dto.UpdateInvoiceStateRequest true  "New state for the invoice"
-// @Success      200 {object}  dto.InvoiceResponse "Invoice state updated successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid input or state transition not allowed"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the contractor for this invoice's job"
-// @Failure      404 {object}  map[string]string "Invoice Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /invoices/{id}/state [patch]
-// @Security     BearerAuth
+//	@Summary		Update invoice state
+//	@Description	Updates the state of an invoice (e.g., from 'Waiting' to 'Complete'). ONLY allowed by the assigned contractor.
+//	@Tags			invoices
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string							true	"Invoice ID"	Format(uuid)
+//	@Param			state	body		dto.UpdateInvoiceStateRequest	true	"New state for the invoice"
+//	@Success		200		{object}	dto.InvoiceResponse				"Invoice state updated successfully"
+//	@Failure		400		{object}	map[string]string				"Bad Request - Invalid input or state transition not allowed"
+//	@Failure		401		{object}	map[string]string				"Unauthorized"
+//	@Failure		403		{object}	map[string]string				"Forbidden - User is not the contractor for this invoice's job"
+//	@Failure		404		{object}	map[string]string				"Invoice Not Found"
+//	@Failure		500		{object}	map[string]string				"Internal Server Error"
+//	@Router			/invoices/{id}/state [patch]
+//	@Security		BearerAuth
 func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 	// Get UserID
 	userID, err := middleware.GetUserIDFromContext(c)
@@ -288,20 +288,20 @@ func (h *InvoiceHandler) UpdateInvoiceState(c *gin.Context) {
 }
 
 // DeleteInvoice godoc
-// @Summary      Delete an invoice
-// @Description  Deletes an invoice. Only allowed by the assigned contractor if the invoice state is 'Waiting'.
-// @Tags         invoices
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Invoice ID" Format(uuid)
-// @Success      204 {object}  nil "Invoice deleted successfully"
-// @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not contractor or invoice state prevents deletion"
-// @Failure      404 {object}  map[string]string "Invoice Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /invoices/{id} [delete]
-// @Security     BearerAuth
+//	@Summary		Delete an invoice
+//	@Description	Deletes an invoice. Only allowed by the assigned contractor if the invoice state is 'Waiting'.
+//	@Tags			invoices
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Invoice ID"	Format(uuid)
+//	@Success		204	{object}	nil					"Invoice deleted successfully"
+//	@Failure		400	{object}	map[string]string	"Invalid ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized"
+//	@Failure		403	{object}	map[string]string	"Forbidden - User is not contractor or invoice state prevents deletion"
+//	@Failure		404	{object}	map[string]string	"Invoice Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/invoices/{id} [delete]
+//	@Security		BearerAuth
 func (h *InvoiceHandler) DeleteInvoice(c *gin.Context) {
 	// Get UserID
 	userID, err := middleware.GetUserIDFromContext(c)

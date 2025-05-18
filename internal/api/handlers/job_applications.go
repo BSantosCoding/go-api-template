@@ -31,20 +31,20 @@ func NewJobApplicationHandler(service services.JobApplicationService, validate *
 var _ JobApplicationHandlerInterface = (*JobApplicationHandler)(nil)
 
 // ApplyToJob godoc
-// @Summary      Apply for a job
-// @Description  Allows a logged-in user (contractor) to apply for a specific job.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Job ID to apply for" Format(uuid)
-// @Success      201 {object}  dto.JobApplicationResponse "Application created successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid Job ID or already applied"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - Cannot apply (e.g., employer applying to own job, job not available)"
-// @Failure      404 {object}  map[string]string "Not Found - Job not found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{job_id}/apply [post]
-// @Security     BearerAuth
+//	@Summary		Apply for a job
+//	@Description	Allows a logged-in user (contractor) to apply for a specific job.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string						true	"Job ID to apply for"	Format(uuid)
+//	@Success		201	{object}	dto.JobApplicationResponse	"Application created successfully"
+//	@Failure		400	{object}	map[string]string			"Bad Request - Invalid Job ID or already applied"
+//	@Failure		401	{object}	map[string]string			"Unauthorized"
+//	@Failure		403	{object}	map[string]string			"Forbidden - Cannot apply (e.g., employer applying to own job, job not available)"
+//	@Failure		404	{object}	map[string]string			"Not Found - Job not found"
+//	@Failure		500	{object}	map[string]string			"Internal Server Error"
+//	@Router			/jobs/{id}/apply [post]
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) ApplyToJob(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -53,7 +53,7 @@ func (h *JobApplicationHandler) ApplyToJob(c *gin.Context) {
 		return
 	}
 
-	jobIDStr := c.Param("id") // Assuming the job ID is in the path like /jobs/{job_id}/apply
+	jobIDStr := c.Param("id") // Assuming the job ID is in the path like /jobs/{id}/apply
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
@@ -91,20 +91,20 @@ func (h *JobApplicationHandler) ApplyToJob(c *gin.Context) {
 }
 
 // GetApplicationByID godoc
-// @Summary      Get a job application by ID
-// @Description  Retrieves details for a specific job application. Requires user to be the applicant or the job employer.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Application ID" Format(uuid)
-// @Success      200 {object}  dto.JobApplicationResponse "Successfully retrieved application"
-// @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User not associated with this application"
-// @Failure      404 {object}  map[string]string "Application Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /applications/{id} [get]
-// @Security     BearerAuth
+//	@Summary		Get a job application by ID
+//	@Description	Retrieves details for a specific job application. Requires user to be the applicant or the job employer.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string						true	"Application ID"	Format(uuid)
+//	@Success		200	{object}	dto.JobApplicationResponse	"Successfully retrieved application"
+//	@Failure		400	{object}	map[string]string			"Invalid ID format"
+//	@Failure		401	{object}	map[string]string			"Unauthorized"
+//	@Failure		403	{object}	map[string]string			"Forbidden - User not associated with this application"
+//	@Failure		404	{object}	map[string]string			"Application Not Found"
+//	@Failure		500	{object}	map[string]string			"Internal Server Error"
+//	@Router			/applications/{id} [get]
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) GetApplicationByID(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -143,19 +143,19 @@ func (h *JobApplicationHandler) GetApplicationByID(c *gin.Context) {
 }
 
 // ListApplicationsByContractor godoc
-// @Summary      List applications submitted by the authenticated user
-// @Description  Retrieves a list of job applications submitted by the currently authenticated user (contractor). Supports pagination.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Success      200 {array}   dto.JobApplicationResponse "Successfully retrieved list of applications"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /applications/my [get] // Example route
-// @Security     BearerAuth
+//	@Summary		List applications submitted by the authenticated user
+//	@Description	Retrieves a list of job applications submitted by the currently authenticated user (contractor). Supports pagination.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			limit	query		int							false	"Pagination limit"	default(10)
+//	@Param			offset	query		int							false	"Pagination offset"	default(0)
+//	@Success		200		{array}		dto.JobApplicationResponse	"Successfully retrieved list of applications"
+//	@Failure		400		{object}	map[string]string			"Bad Request - Invalid query parameters"
+//	@Failure		401		{object}	map[string]string			"Unauthorized"
+//	@Failure		500		{object}	map[string]string			"Internal Server Error"
+//	@Router			/applications/my [get] // Example route
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -200,22 +200,22 @@ func (h *JobApplicationHandler) ListApplicationsByContractor(c *gin.Context) {
 }
 
 // ListApplicationsByJob godoc
-// @Summary      List applications for a specific job
-// @Description  Retrieves a list of applications for a specific job. Only allowed for the employer who posted the job. Supports pagination.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path string true "Job ID" Format(uuid)
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Success      200 {array}   dto.JobApplicationResponse "Successfully retrieved list of applications"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid Job ID or query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the employer for this job"
-// @Failure      404 {object}  map[string]string "Not Found - Job not found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{job_id}/applications [get] // Example route
-// @Security     BearerAuth
+//	@Summary		List applications for a specific job
+//	@Description	Retrieves a list of applications for a specific job. Only allowed for the employer who posted the job. Supports pagination.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Job ID"			Format(uuid)
+//	@Param			limit	query		int							false	"Pagination limit"	default(10)
+//	@Param			offset	query		int							false	"Pagination offset"	default(0)
+//	@Success		200		{array}		dto.JobApplicationResponse	"Successfully retrieved list of applications"
+//	@Failure		400		{object}	map[string]string			"Bad Request - Invalid Job ID or query parameters"
+//	@Failure		401		{object}	map[string]string			"Unauthorized"
+//	@Failure		403		{object}	map[string]string			"Forbidden - User is not the employer for this job"
+//	@Failure		404		{object}	map[string]string			"Not Found - Job not found"
+//	@Failure		500		{object}	map[string]string			"Internal Server Error"
+//	@Router			/jobs/{id}/applications [get] // Example route
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -274,21 +274,21 @@ func (h *JobApplicationHandler) ListApplicationsByJob(c *gin.Context) {
 }
 
 // AcceptApplication godoc
-// @Summary      Accept a job application
-// @Description  Allows the employer to accept a 'Waiting' application. This assigns the contractor to the job, changes the job state to 'Ongoing', and rejects other pending applications for the same job.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Application ID" Format(uuid)
-// @Success      200 {object}  dto.JobResponse "Application accepted, job updated"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the employer or job/application state is invalid"
-// @Failure      404 {object}  map[string]string "Not Found - Application or Job not found"
-// @Failure      409 {object}  map[string]string "Conflict - Job/Application state prevents acceptance"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /applications/{id}/accept [patch]
-// @Security     BearerAuth
+//	@Summary		Accept a job application
+//	@Description	Allows the employer to accept a 'Waiting' application. This assigns the contractor to the job, changes the job state to 'Ongoing', and rejects other pending applications for the same job.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Application ID"	Format(uuid)
+//	@Success		200	{object}	dto.JobResponse		"Application accepted, job updated"
+//	@Failure		400	{object}	map[string]string	"Bad Request - Invalid ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized"
+//	@Failure		403	{object}	map[string]string	"Forbidden - User is not the employer or job/application state is invalid"
+//	@Failure		404	{object}	map[string]string	"Not Found - Application or Job not found"
+//	@Failure		409	{object}	map[string]string	"Conflict - Job/Application state prevents acceptance"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/applications/{id}/accept [patch]
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) AcceptApplication(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -330,21 +330,21 @@ func (h *JobApplicationHandler) AcceptApplication(c *gin.Context) {
 }
 
 // RejectApplication godoc
-// @Summary      Reject a job application
-// @Description  Allows the employer to reject a 'Waiting' application.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Application ID" Format(uuid)
-// @Success      200 {object}  dto.JobApplicationResponse "Application rejected successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the employer or application state is invalid"
-// @Failure      404 {object}  map[string]string "Not Found - Application or Job not found"
-// @Failure      409 {object}  map[string]string "Conflict - Application state prevents rejection"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /applications/{id}/reject [patch]
-// @Security     BearerAuth
+//	@Summary		Reject a job application
+//	@Description	Allows the employer to reject a 'Waiting' application.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string						true	"Application ID"	Format(uuid)
+//	@Success		200	{object}	dto.JobApplicationResponse	"Application rejected successfully"
+//	@Failure		400	{object}	map[string]string			"Bad Request - Invalid ID format"
+//	@Failure		401	{object}	map[string]string			"Unauthorized"
+//	@Failure		403	{object}	map[string]string			"Forbidden - User is not the employer or application state is invalid"
+//	@Failure		404	{object}	map[string]string			"Not Found - Application or Job not found"
+//	@Failure		409	{object}	map[string]string			"Conflict - Application state prevents rejection"
+//	@Failure		500	{object}	map[string]string			"Internal Server Error"
+//	@Router			/applications/{id}/reject [patch]
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) RejectApplication(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -385,21 +385,21 @@ func (h *JobApplicationHandler) RejectApplication(c *gin.Context) {
 }
 
 // WithdrawApplication godoc
-// @Summary      Withdraw a job application
-// @Description  Allows the applicant (contractor) to withdraw their 'Waiting' application.
-// @Tags         job_applications
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Application ID" Format(uuid)
-// @Success      200 {object}  dto.JobApplicationResponse "Application withdrawn successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User is not the applicant or application state is invalid"
-// @Failure      404 {object}  map[string]string "Not Found - Application not found"
-// @Failure      409 {object}  map[string]string "Conflict - Application state prevents withdrawal"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /applications/{id}/withdraw [patch]
-// @Security     BearerAuth
+//	@Summary		Withdraw a job application
+//	@Description	Allows the applicant (contractor) to withdraw their 'Waiting' application.
+//	@Tags			job_applications
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string						true	"Application ID"	Format(uuid)
+//	@Success		200	{object}	dto.JobApplicationResponse	"Application withdrawn successfully"
+//	@Failure		400	{object}	map[string]string			"Bad Request - Invalid ID format"
+//	@Failure		401	{object}	map[string]string			"Unauthorized"
+//	@Failure		403	{object}	map[string]string			"Forbidden - User is not the applicant or application state is invalid"
+//	@Failure		404	{object}	map[string]string			"Not Found - Application not found"
+//	@Failure		409	{object}	map[string]string			"Conflict - Application state prevents withdrawal"
+//	@Failure		500	{object}	map[string]string			"Internal Server Error"
+//	@Router			/applications/{id}/withdraw [patch]
+//	@Security		BearerAuth
 func (h *JobApplicationHandler) WithdrawApplication(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {

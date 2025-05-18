@@ -8,31 +8,31 @@ import (
 
 // GetUserByIdRequest defines the structure for getting a user by id.
 type GetUserByIdRequest struct {
-	ID        uuid.UUID    `json:"id" validate:"required"` 
+	ID uuid.UUID `json:"id" validate:"required"`
 }
 
 // GetUserByEmailRequest defines the structure for getting a user by email.
 type GetUserByEmailRequest struct {
-	Email        string   `json:"email" validate:"required,email"` 
+	Email string `json:"email" validate:"required,email"`
 }
 
 // CreateUserRequest defines the structure for creating a new user.
 type CreateUserRequest struct {
 	Email    string `json:"email" validate:"required,email"`
-	Name string `json:"name" validate:"omitempty,max=100"`     // Optional field
+	Name     string `json:"name" validate:"omitempty,max=100"`  // Optional field
 	Password string `json:"password" validate:"required,min=8"` // Required field
 }
 
 // UpdateUserRequest defines the structure for updating an existing user.
 type UpdateUserRequest struct {
-	// Email    *string `json:"email" validate:"omitempty,email"` 
-	Name *string `json:"name" validate:"omitempty,max=100"`
-	ID        uuid.UUID    `json:"id" validate:"required"`
+	// Email    *string `json:"email" validate:"omitempty,email"`
+	Name *string   `json:"name" validate:"omitempty,max=100"`
+	ID   uuid.UUID `json:"id" validate:"required"`
 }
 
 // DeleteUserRequest defines the structure for deleting a user.
 type DeleteUserRequest struct {
-	ID        uuid.UUID    `json:"id" validate:"required"` 
+	ID uuid.UUID `json:"id" validate:"required"`
 }
 
 // LoginRequest defines the structure for the login request body.
@@ -52,14 +52,20 @@ type UserResponse struct {
 
 // LoginResponse defines the data returned after successful login.
 type LoginResponse struct {
-	User  UserResponse `json:"user"`
-	Token string       `json:"accessToken,omitempty"` // Access Token
-	RefreshToken string `json:"refreshToken"` // Refresh Token
+	User         UserResponse `json:"user"`
+	Token        string       `json:"accessToken,omitempty"` // Access Token
+	RefreshToken string       `json:"refreshToken"`          // Refresh Token
 }
 
 // RefreshRequest defines the structure for requesting a new access token.
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
+}
+
+// RefreshResponse defines the data returned after successful refresh.
+type RefreshResponse struct {
+	Token        string `json:"accessToken,omitempty"` // Access Token
+	RefreshToken string `json:"refreshToken"`          // Refresh Token
 }
 
 // LogoutRequest defines the structure for requesting logout.

@@ -31,18 +31,18 @@ func NewJobHandler(service services.JobService, validate *validator.Validate) *J
 }
 
 // CreateJob godoc
-// @Summary      Create a new job posting
-// @Description  Adds a new job available for contractors. Employer ID is taken from auth context.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        job body      dto.CreateJobRequest true  "Job details (EmployerID ignored)"
-// @Success      201 {object}  dto.JobResponse "Job created successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid input"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs [post]
-// @Security     BearerAuth
+//	@Summary		Create a new job posting
+//	@Description	Adds a new job available for contractors. Employer ID is taken from auth context.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			job	body		dto.CreateJobRequest	true	"Job details (EmployerID ignored)"
+//	@Success		201	{object}	dto.JobResponse			"Job created successfully"
+//	@Failure		400	{object}	map[string]string		"Bad Request - Invalid input"
+//	@Failure		401	{object}	map[string]string		"Unauthorized"
+//	@Failure		500	{object}	map[string]string		"Internal Server Error"
+//	@Router			/jobs [post]
+//	@Security		BearerAuth
 func (h *JobHandler) CreateJob(c *gin.Context) {
 	// Get EmployerID from auth context
 	employerID, err := middleware.GetUserIDFromContext(c)
@@ -85,19 +85,19 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 }
 
 // GetJobByID godoc
-// @Summary      Get a job by ID
-// @Description  Retrieves details for a specific job by its ID.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Job ID" Format(uuid)
-// @Success      200 {object}  dto.JobResponse "Successfully retrieved job"
-// @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      404 {object}  map[string]string "Job Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{id} [get]
-// @Security     BearerAuth
+//	@Summary		Get a job by ID
+//	@Description	Retrieves details for a specific job by its ID.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Job ID"	Format(uuid)
+//	@Success		200	{object}	dto.JobResponse		"Successfully retrieved job"
+//	@Failure		400	{object}	map[string]string	"Invalid ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized"
+//	@Failure		404	{object}	map[string]string	"Job Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/{id} [get]
+//	@Security		BearerAuth
 func (h *JobHandler) GetJobByID(c *gin.Context) {
 	// Parse ID from path
 	idStr := c.Param("id")
@@ -130,21 +130,21 @@ func (h *JobHandler) GetJobByID(c *gin.Context) {
 }
 
 // ListAvailableJobs godoc
-// @Summary      List available jobs
-// @Description  Retrieves a list of jobs that are 'Waiting' and have no contractor assigned. Supports filtering and pagination.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Param        min_rate query number false "Minimum rate filter"
-// @Param        max_rate query number false "Maximum rate filter"
-// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of available jobs"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/available [get]
-// @Security     BearerAuth
+//	@Summary		List available jobs
+//	@Description	Retrieves a list of jobs that are 'Waiting' and have no contractor assigned. Supports filtering and pagination.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			limit		query		int					false	"Pagination limit"	default(10)
+//	@Param			offset		query		int					false	"Pagination offset"	default(0)
+//	@Param			min_rate	query		number				false	"Minimum rate filter"
+//	@Param			max_rate	query		number				false	"Maximum rate filter"
+//	@Success		200			{array}		dto.JobResponse		"Successfully retrieved list of available jobs"
+//	@Failure		400			{object}	map[string]string	"Bad Request - Invalid query parameters"
+//	@Failure		401			{object}	map[string]string	"Unauthorized"
+//	@Failure		500			{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/available [get]
+//	@Security		BearerAuth
 func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
 	var req dto.ListAvailableJobsRequest
 
@@ -187,22 +187,22 @@ func (h *JobHandler) ListAvailableJobs(c *gin.Context) {
 }
 
 // ListEmployerJobs godoc
-// @Summary      List jobs posted by the authenticated employer
-// @Description  Retrieves a list of jobs posted by the currently authenticated user (employer). Supports filtering and pagination.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Param        state query string false "Filter by state (Waiting, Ongoing, Complete, Archived)" Enums(Waiting, Ongoing, Complete, Archived)
-// @Param        min_rate query number false "Minimum rate filter"
-// @Param        max_rate query number false "Maximum rate filter"
-// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of employer's jobs"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/my/employer [get] // Example route
-// @Security     BearerAuth
+//	@Summary		List jobs posted by the authenticated employer
+//	@Description	Retrieves a list of jobs posted by the currently authenticated user (employer). Supports filtering and pagination.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			limit		query		int					false	"Pagination limit"											default(10)
+//	@Param			offset		query		int					false	"Pagination offset"											default(0)
+//	@Param			state		query		string				false	"Filter by state (Waiting, Ongoing, Complete, Archived)"	Enums(Waiting, Ongoing, Complete, Archived)
+//	@Param			min_rate	query		number				false	"Minimum rate filter"
+//	@Param			max_rate	query		number				false	"Maximum rate filter"
+//	@Success		200			{array}		dto.JobResponse		"Successfully retrieved list of employer's jobs"
+//	@Failure		400			{object}	map[string]string	"Bad Request - Invalid query parameters"
+//	@Failure		401			{object}	map[string]string	"Unauthorized"
+//	@Failure		500			{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/my/employer [get] // Example route
+//	@Security		BearerAuth
 func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 	// Get EmployerID from auth context
 	employerID, err := middleware.GetUserIDFromContext(c)
@@ -252,22 +252,22 @@ func (h *JobHandler) ListEmployerJobs(c *gin.Context) {
 }
 
 // ListContractorJobs godoc
-// @Summary      List jobs taken by the authenticated contractor
-// @Description  Retrieves a list of jobs assigned to the currently authenticated user (contractor). Supports filtering and pagination.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        limit query int false "Pagination limit" default(10)
-// @Param        offset query int false "Pagination offset" default(0)
-// @Param        state query string false "Filter by state (Ongoing, Complete, Archived)" Enums(Ongoing, Complete, Archived)
-// @Param        min_rate query number false "Minimum rate filter"
-// @Param        max_rate query number false "Maximum rate filter"
-// @Success      200 {array}   dto.JobResponse "Successfully retrieved list of contractor's jobs"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid query parameters"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/my/contractor [get] // Example route
-// @Security     BearerAuth
+//	@Summary		List jobs taken by the authenticated contractor
+//	@Description	Retrieves a list of jobs assigned to the currently authenticated user (contractor). Supports filtering and pagination.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			limit		query		int					false	"Pagination limit"								default(10)
+//	@Param			offset		query		int					false	"Pagination offset"								default(0)
+//	@Param			state		query		string				false	"Filter by state (Ongoing, Complete, Archived)"	Enums(Ongoing, Complete, Archived)
+//	@Param			min_rate	query		number				false	"Minimum rate filter"
+//	@Param			max_rate	query		number				false	"Maximum rate filter"
+//	@Success		200			{array}		dto.JobResponse		"Successfully retrieved list of contractor's jobs"
+//	@Failure		400			{object}	map[string]string	"Bad Request - Invalid query parameters"
+//	@Failure		401			{object}	map[string]string	"Unauthorized"
+//	@Failure		500			{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/my/contractor [get] // Example route
+//	@Security		BearerAuth
 func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 	// Get ContractorID from auth context
 	contractorID, err := middleware.GetUserIDFromContext(c)
@@ -317,21 +317,21 @@ func (h *JobHandler) ListContractorJobs(c *gin.Context) {
 }
 
 // UpdateJobDetails godoc
-// @Summary      Update job rate or duration
-// @Description  Allows the employer to update the rate or duration ONLY if the job is in 'Waiting' state and has no contractor assigned.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Job ID" Format(uuid)
-// @Param        details body dto.UpdateJobDetailsRequest true "Rate and/or Duration to update"
-// @Success      200 {object}  dto.JobResponse "Job details updated successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid input"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User cannot update details or job state prevents it"
-// @Failure      404 {object}  map[string]string "Job Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{id}/details [patch]
-// @Security     BearerAuth
+//	@Summary		Update job rate or duration
+//	@Description	Allows the employer to update the rate or duration ONLY if the job is in 'Waiting' state and has no contractor assigned.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Job ID"	Format(uuid)
+//	@Param			details	body		dto.UpdateJobDetailsRequest	true	"Rate and/or Duration to update"
+//	@Success		200		{object}	dto.JobResponse				"Job details updated successfully"
+//	@Failure		400		{object}	map[string]string			"Bad Request - Invalid input"
+//	@Failure		401		{object}	map[string]string			"Unauthorized"
+//	@Failure		403		{object}	map[string]string			"Forbidden - User cannot update details or job state prevents it"
+//	@Failure		404		{object}	map[string]string			"Job Not Found"
+//	@Failure		500		{object}	map[string]string			"Internal Server Error"
+//	@Router			/jobs/{id}/details [patch]
+//	@Security		BearerAuth
 func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -382,21 +382,21 @@ func (h *JobHandler) UpdateJobDetails(c *gin.Context) {
 }
 
 // UpdateJobState godoc
-// @Summary      Update job state
-// @Description  Allows the employer or the assigned contractor to update the job state according to valid transitions (Waiting -> Ongoing -> Complete -> Archived).
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Job ID" Format(uuid)
-// @Param        state body dto.UpdateJobStateRequest true "New state for the job"
-// @Success      200 {object}  dto.JobResponse "Job state updated successfully"
-// @Failure      400 {object}  map[string]string "Bad Request - Invalid input or invalid state transition"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User cannot update state for this job"
-// @Failure      404 {object}  map[string]string "Job Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{id}/state [patch]
-// @Security     BearerAuth
+//	@Summary		Update job state
+//	@Description	Allows the employer or the assigned contractor to update the job state according to valid transitions (Waiting -> Ongoing -> Complete -> Archived).
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Job ID"	Format(uuid)
+//	@Param			state	body		dto.UpdateJobStateRequest	true	"New state for the job"
+//	@Success		200		{object}	dto.JobResponse				"Job state updated successfully"
+//	@Failure		400		{object}	map[string]string			"Bad Request - Invalid input or invalid state transition"
+//	@Failure		401		{object}	map[string]string			"Unauthorized"
+//	@Failure		403		{object}	map[string]string			"Forbidden - User cannot update state for this job"
+//	@Failure		404		{object}	map[string]string			"Job Not Found"
+//	@Failure		500		{object}	map[string]string			"Internal Server Error"
+//	@Router			/jobs/{id}/state [patch]
+//	@Security		BearerAuth
 func (h *JobHandler) UpdateJobState(c *gin.Context) {
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
@@ -443,20 +443,20 @@ func (h *JobHandler) UpdateJobState(c *gin.Context) {
 }
 
 // DeleteJob
-// @Summary      Delete a job
-// @Description  Deletes a job posting. Allowed only by the employer if the job is in 'Waiting' state and has no contractor.
-// @Tags         jobs
-// @Accept       json
-// @Produce      json
-// @Param        id path      string true  "Job ID" Format(uuid)
-// @Success      204 {object}  nil "Job deleted successfully"
-// @Failure      400 {object}  map[string]string "Invalid ID format"
-// @Failure      401 {object}  map[string]string "Unauthorized"
-// @Failure      403 {object}  map[string]string "Forbidden - User cannot delete this job or job state prevents deletion"
-// @Failure      404 {object}  map[string]string "Job Not Found"
-// @Failure      500 {object}  map[string]string "Internal Server Error"
-// @Router       /jobs/{id} [delete]
-// @Security     BearerAuth
+//	@Summary		Delete a job
+//	@Description	Deletes a job posting. Allowed only by the employer if the job is in 'Waiting' state and has no contractor.
+//	@Tags			jobs
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Job ID"	Format(uuid)
+//	@Success		204	{object}	nil					"Job deleted successfully"
+//	@Failure		400	{object}	map[string]string	"Invalid ID format"
+//	@Failure		401	{object}	map[string]string	"Unauthorized"
+//	@Failure		403	{object}	map[string]string	"Forbidden - User cannot delete this job or job state prevents deletion"
+//	@Failure		404	{object}	map[string]string	"Job Not Found"
+//	@Failure		500	{object}	map[string]string	"Internal Server Error"
+//	@Router			/jobs/{id} [delete]
+//	@Security		BearerAuth
 func (h *JobHandler) DeleteJob(c *gin.Context) {
 	// Get UserID from auth context
 	userID, err := middleware.GetUserIDFromContext(c)
