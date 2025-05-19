@@ -7,6 +7,7 @@ import (
 )
 
 // HealthCheck handles the health check endpoint
+//
 //	@Summary		Health check
 //	@Description	Check if the service is up and running
 //	@Tags			Health

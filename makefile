@@ -38,7 +38,7 @@ dev: check-air swagger-gen ## Run the application with hot-reloading using Air (
 
 swagger-gen: check-swag ## Generate/Update Swagger documentation files in ./docs based on annotations
 	@echo "Generating Swagger documentation..."
-	@$(SWAG_CMD) init --v3.1 -g main.go # Specify main go file explicitly
+	@$(SWAG_CMD) init -g main.go # Specify main go file explicitly
 	@echo "Swagger documentation generated in ./docs directory."
 
 test: ## Run all Service Integration tests 
@@ -80,7 +80,7 @@ install-atlas: ## Install the atlas CLI tool (requires Go)
 
 install-swag: ## Install the swag CLI tool (requires Go)
 	@echo "Installing swag CLI..."
-	@go install github.com/swaggo/swag/v2/cmd/swag@latest
+	@go install github.com/swaggo/swag/cmd/swag@latest
 	@echo "swag installed. Ensure $(go env GOPATH)/bin is in your PATH."
 
 install-air: ## Install the air CLI tool for hot-reloading (requires Go)
