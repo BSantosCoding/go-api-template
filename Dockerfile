@@ -23,7 +23,7 @@ RUN git config --global --add safe.directory /app
 # Install development tools (air, swag, migrate)
 # These are installed in the builder stage, migrate CLI will be copied to final stage
 RUN go install -buildvcs=false github.com/air-verse/air@latest
-RUN go install -buildvcs=false github.com/swaggo/swag/cmd/swag@latest
+RUN go install -buildvcs=false github.com/swaggo/swag/v2/cmd/swag@latest
 RUN go install -buildvcs=false -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Generate Swagger docs before building

@@ -11,6 +11,8 @@ import (
 	"go-api-template/internal/services"
 
 	oapi_middleware "github.com/oapi-codegen/gin-middleware"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/gin-contrib/cors"
@@ -75,6 +77,10 @@ func NewServer(app *app.Application) *Server {
 	strictHandler := api.NewStrictHandler(serverDefinition, []api.StrictMiddlewareFunc{})
 
 	api.RegisterHandlers(router, strictHandler)
+	// --- Swagger UI ---)
+	log.Println("Configuring Swagger UI handler")
+	// Register the Swagger UI handler WITHOUT the explicit URL option.
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Apply the validator middleware to the router
 	router.Use(validator)
