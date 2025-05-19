@@ -29,6 +29,8 @@ func ptrFloat64(f float64) *float64 { return &f }
 // Helper to create a pointer to an int
 func ptrInt(i int) *int { return &i }
 
+func ptrStr(s string) *string { return &s }
+
 // Helper function to create a user for tests
 func createTestUser(t *testing.T, ctx context.Context, pool *ent.Client, email, name string) *ent.User {
 	t.Helper()
@@ -77,19 +79,12 @@ func createTestJob(t *testing.T, ctx context.Context, pool *ent.Client, employer
 var testDB *ent.Client
 var testRedisClient *redis.Client
 
-// getTestClients establishes a connection pool to the test database.
-// It reads the DSN from the TEST_DATABASE_URL environment variable.
 func getTestClients(t *testing.T) (*ent.Client, *redis.Client) {
 	// Use t.Helper() to mark this as a test helper function
 	t.Helper()
 	log.SetOutput(io.Discard) // Disable logging during tests
 
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("TEST_DATABASE_URL environment variable not set")
-	}
-
-	db, err := sql.Open("pgx", dsn)
+	db, err := sql.Open("pgx", os.Getenv("TEST_DATABASE_URL"))
 	if err != nil {
 		return nil, nil
 	}

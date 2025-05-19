@@ -1,38 +1,40 @@
-// internal/api/middleware/auth.go
 package middleware
 
 import (
+	"context" // Import context
 	"errors"
 	"fmt"
-	"log"
-	"net/http"
+	"log" // Import http for accessing request headers
 	"strings"
 
+	"github.com/getkin/kin-openapi/openapi3filter" // Import openapi3filter
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid" // For parsing UUID from claim
+	"github.com/google/uuid"
 )
 
 const (
-	authorizationHeader = "Authorization"
-	userCtx             = "userID" // Key to store user ID in context
+	authorizationHeader            = "Authorization"
+	userCtx                        = "userID"
+	userIDContextKey    contextKey = "userID"
 )
 
-// JWTAuthMiddleware creates a Gin middleware for JWT authentication.
-func JWTAuthMiddleware(jwtSecret string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader(authorizationHeader)
+type contextKey string // Custom type for context key to avoid collisions
+func JWTAuthenticationFunc(jwtSecret string) openapi3filter.AuthenticationFunc {
+	return func(ctx context.Context, input *openapi3filter.AuthenticationInput) error {
+		// The http.Request is available via input.Request
+		req := input.RequestValidationInput
+		authHeader := req.Request.Header.Get(authorizationHeader)
 		if authHeader == "" {
-			log.Println("Auth middleware: Authorization header missing")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			return
+			log.Println("Auth middleware (openapi3filter): Authorization header missing")
+			// Return an authentication error
+			return openapi3filter.ErrInvalidEmptyValue
 		}
 
 		headerParts := strings.Split(authHeader, " ")
 		if len(headerParts) != 2 || strings.ToLower(headerParts[0]) != "bearer" {
-			log.Println("Auth middleware: Invalid Authorization header format")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
-			return
+			log.Println("Auth middleware (openapi3filter): Invalid Authorization header format")
+			return openapi3filter.ErrInvalidRequired
 		}
 
 		tokenString := headerParts[1]
@@ -47,45 +49,52 @@ func JWTAuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		})
 
 		if err != nil {
-			log.Printf("Auth middleware: Error parsing token: %v", err)
+			log.Printf("Auth middleware (openapi3filter): Error parsing token: %v", err)
+			// Return appropriate errors based on the JWT error
 			if errors.Is(err, jwt.ErrTokenExpired) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token has expired"})
-			} else {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+				// Indicate authentication failed specifically due to expiration
+				return fmt.Errorf("%w: token expired", openapi3filter.ErrInvalidRequired)
 			}
-			return
+			// Wrap other errors in ErrAuthenticationFailed
+			return fmt.Errorf("%w: %v", openapi3filter.ErrInvalidRequired, err)
 		}
 
 		if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && token.Valid {
 			// Token is valid, extract user ID (subject)
 			userID, err := uuid.Parse(claims.Subject)
 			if err != nil {
-				log.Printf("Auth middleware: Error parsing user ID from token subject '%s': %v", claims.Subject, err)
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid user identifier in token"})
-				return
+				log.Printf("Auth middleware (openapi3filter): Error parsing user ID from token subject '%s': %v", claims.Subject, err)
+				return fmt.Errorf("%w: invalid user identifier in token", openapi3filter.ErrInvalidRequired)
 			}
 
-			// Store user ID in context for downstream handlers
-			c.Set(userCtx, userID)
-			log.Printf("Auth middleware: User %s authenticated", userID)
-			c.Next() // Proceed to the next handler
+			req.Request.Clone(context.WithValue(ctx, userIDContextKey, userID))
+			log.Printf("Auth middleware (openapi3filter): User %s authenticated", userID)
+
+			// Return nil to indicate success
+			return nil // Authentication successful
 		} else {
-			log.Println("Auth middleware: Invalid token claims or token is not valid")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			log.Println("Auth middleware (openapi3filter): Invalid token claims or token is not valid")
+			return openapi3filter.ErrInvalidRequired
 		}
 	}
 }
 
-// Helper function to get user ID from context (optional but convenient)
+// Helper function to get user ID from Gin context after authentication.
+// Assumes that JWTAuthenticationFunc and oapi-codegen's Gin middleware
+// have successfully placed the userID into the Gin context using the
+// userIDContextKey.
 func GetUserIDFromContext(c *gin.Context) (uuid.UUID, error) {
+	// Retrieve using the context key defined for the standard context
 	userIDAny, exists := c.Get(userCtx)
 	if !exists {
-		return uuid.Nil, errors.New("user ID not found in context")
+		// This should ideally not happen if the middleware ran correctly
+		return uuid.Nil, errors.New("user ID not found in Gin context after authentication")
 	}
 
 	userID, ok := userIDAny.(uuid.UUID)
 	if !ok {
-		return uuid.Nil, errors.New("user ID in context is of invalid type")
+		// This should ideally not happen if the correct type was stored
+		return uuid.Nil, errors.New("user ID in Gin context is of invalid type")
 	}
 
 	return userID, nil

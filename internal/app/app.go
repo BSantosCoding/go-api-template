@@ -5,7 +5,6 @@ import (
 	"go-api-template/config"
 	"go-api-template/ent"
 
-	"github.com/go-playground/validator"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -14,5 +13,4 @@ type Application struct {
 	Config      *config.Config
 	EntClient   *ent.Client
 	RedisClient *redis.Client
-	Validator   *validator.Validate
 }

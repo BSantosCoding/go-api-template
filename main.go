@@ -18,8 +18,6 @@ import (
 	_ "go-api-template/docs" // Import generated docs (will be created by swag init)
 
 	_ "github.com/jackc/pgx/v5"
-
-	"github.com/go-playground/validator"
 )
 
 //	@title			Go API Template API
@@ -38,10 +36,10 @@ import (
 //	@BasePath	/api/v1
 //	@schemes	http https
 
-//	@securityDefinitions.apikey	BearerAuth
-//	@in							header
-//	@name						Authorization
-//	@description				Type "Bearer" followed by a space and JWT token.
+// @securityDefinitions.apikey	BearerAuth
+// @in							header
+// @name						Authorization
+// @description				Type "Bearer" followed by a space and JWT token.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -77,13 +75,10 @@ func main() {
 		log.Println("Blockchain listener configuration missing (RPC URL, Address, or ABI Path), skipping initialization.")
 	}
 
-	validate := validator.New()
-
 	application := &app.Application{
 		Config:      cfg,
 		EntClient:   entClient,
 		RedisClient: redisClient,
-		Validator:   validate,
 	}
 
 	srv := server.NewServer(application)
